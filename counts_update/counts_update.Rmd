@@ -1,0 +1,74 @@
+---
+title: "counts_update"
+author: "bobby"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Counts Updater  
+Document scheduled run to automatically update counts data for LGS passage indicator.
+
+```{r counts-update}
+# query FPC database to update the LMN and LGS counts ----
+library(RODBC)
+channel <- odbcDriverConnect("case=nochange;Description=Global;
+  DRIVER=SQL Server;SERVER=SQL2;UID=sa;PWD=frznool;
+  WSID=CUTTHROAT;DATABASE=pittag;Network=DBMSSOCN")
+
+ad_ct <- sqlQuery(channel, "
+SELECT dam, datadate, chin_adult, chin_jack, 'chin_all' = (chin_adult + chin_jack) 
+from [pittag].[dbo].[HistFishTwo]
+  where dam in ('LGS', 'LMN')
+  and datepart(MM, datadate) in ('4','5','6')
+  and datepart(YYYY,datadate) between '1991' and '2018'
+  order by dam, datadate
+")
+
+odbcCloseAll()
+
+# make lagged LMN counts variables and clean up for data updating ----
+ad_ct$obsDate<- as.Date(ad_ct$datadate, format="%Y-%m-%d")
+ad_ct$obsYear<- format(ad_ct$obsDate, "%Y")
+ad_ct<- ad_ct[,-c(2:4)]
+
+for(yr in unique(ad_ct$obsYear)){
+  # lag LMN counts back 1
+  lmn_dat<- subset(ad_ct, obsYear== yr & dam== "LMN")
+  names(lmn_dat)<- c('dam', 'lmn_0', 'obs_date', 'obs_yr')
+  lmn1<- cbind(obs_date=lmn_dat$obs_date+ 1, lmn_1=lmn_dat$lmn_0)
+  lmn_dat<- merge(lmn_dat, lmn1, by= "obs_date")
+  lmn_dat<- lmn_dat[,-c(2,4)]
+  
+  lgs_dat<-subset(ad_ct, obsYear== yr & dam== "LGS")
+  names(lgs_dat)<- c('dam', 'lgs', 'obs_date', 'obs_yr')
+  # Combine LGS data with LMN data using Lag date to merge
+  if(yr=='1991'){
+    ad_dat<- merge(lmn_dat, lgs_dat[,-1], by= 'obs_date')
+  } else{
+    temp<- merge(lmn_dat, lgs_dat[,-1], by= 'obs_date')
+    ad_dat<- rbind(ad_dat, temp)
+  }
+}
+
+# save new data to passage indicator data folder ----
+wd<- "G:/STAFF/Bobby/adult passage/passage-indicator"
+save(ad_dat, file=paste0(wd, '/da_indicator/data/ad_dat.Rdata'))
+```
+
+```{r app-update}
+# deploy the shiny app again to update data (does not work non-interactively)
+local({r <- getOption("repos")
+       r["CRAN"] <- "https://ftp.osuosl.org/pub/cran/" 
+       options(repos=r)
+}) # set CRAN mirrow
+
+rsconnect::deployApp(appDir = paste0(wd, '/da_indicator'),
+  account="boppingshoe", appId = "281668",
+  launch.browser = FALSE, forceUpdate = getOption("rsconnect.force.update.apps", TRUE))
+```
+
+
