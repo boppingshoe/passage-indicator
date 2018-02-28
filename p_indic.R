@@ -120,65 +120,119 @@ ratio_est(adop$lmn_1, adop$lgs)
 # ----
 
 # travel time and flow and stuff ----
+# loading and format data
 load(file= paste0(wd, '/data compile/pit_flow.Rdata'))
-pit_flow$ftt<- as.numeric(pit_flow$ftt)
-pit_flow$ftm<- pit_flow$ftt*60 # travel time in min
-pit_flow$flow<- ifelse(pit_flow$dis_lgs>100, '3high',
-  ifelse(pit_flow$dis_lgs<60, '1low', '2med'))
 
-hist(pit_flow$ftt, breaks=50)
-hist(subset(pit_flow, srrt=='11H')$ftt, col='red', breaks=50)
-hist(subset(pit_flow, srrt=='11W')$ftt, col='blue', breaks=20, add=TRUE)
-
-abline(v= quantile(pit_flow$ftm, c(90, 95, 97.5)/100))
-# 90%       95%       97.5% 
-# 5520.992  8089.155 11507.052 
-hist(pit_flow[pit_flow$ftm<4500,'ftm'], breaks=50)
-hist(subset(pit_flow, srrt=='11H'&ftm<4500)$ftm, col='red', breaks=50, add=TRUE)
-hist(subset(pit_flow, srrt=='11W'&ftm<4500)$ftm, col='blue', breaks=50, add=TRUE)
-
-pf2<- subset(pit_flow, ftm>2000&ftm<3800)
-round(table(pf2$tag_site)/ table(pit_flow$tag_site), 2)
-summary(pf2$jday) ; summary(pit_flow$jday)
-pf2d<- ifelse(pit_flow$ftm<2000, 0,
-  ifelse(pit_flow$ftm>3800, 0, 1))
-boxplot(pit_flow$jday~pf2d)
-table(pit_flow$srrt, pf2d)
-
+# there seems to be more (in portion) longer ftt in 2017
+# longer ftt in 2017 creates a bimodel distribution in data
+pit_flow$ftt<- pit_flow$ftt_l2g
 windows()
 par(mfrow=c(2,2))
 for(i in unique(pit_flow$yr)){
   hist(subset(pit_flow, yr==i)$ftt, breaks=500, main=i,
-    xlim=c(0, max(pit_flow$ftt)), ylim=c(0, 120))
+    xlim=c(0, max(pit_flow$ftt, na.rm=TRUE)), ylim=c(0, 120))
   print(summary(subset(pit_flow, yr==i)$ftt))
 }
-tbl1<- with(pit_flow, table(yr, pf2d))
-tbl1[,2]/rowSums(tbl1)
+par(mfrow=c(3,5))
+for(i in unique(pitflow2$yr)){
+  hist(1/(subset(pitflow2, yr==i)$ftt), breaks=500, main=i)
+  print(summary(subset(pit_flow, yr==i)$ftt))
+}
+for(i in unique(pit_flow$yr)){
+  hist(1/subset(pit_flow, yr==i)$ftt, breaks=50, main=i)
+  print(summary(subset(pit_flow, yr==i)$ftt))
+} # 1/ftt
 
-tftt<- pit_flow$ftt^(-0.9)
-fmdl1<- lm(tftt~ jday+ dis_lgs, data=pit_flow)
+# what outliers to exclude?
+hist(pit_flow$ftt, breaks=100)
+quantile(pit_flow$ftt, c(90, 95, 97.5)/100, na.rm=TRUE)
+mean(pit_flow$ftt>600, na.rm=TRUE) # <1%
+
+# linear model
+year<- 2018
+fmdl1<- lm(log(ftt)~ jday+ dis_lgs+ km+ yr, data=subset(pit_flow, ftt<600 & yr!=year))
+fmdl1<- lm(I(ftt^(-0.95))~ jday+ dis_lgs+ km+ yr, data=subset(pit_flow, ftt<600 & yr!=year))
+fmdl1<- lm(log(ftt)~ jday+ dis_lgs+ km+ yr, data=subset(pitflow2, ftt<600 & yr!=year))
 summary(fmdl1)
-windows()
 par(mfrow=c(2,2))
 plot(fmdl1)
 
-MASS::boxcox(fmdl1, lambda = seq(-1, -.8, 0.05)) # lambda=-0.9
+# fmdl2<- glm(ftd~ jday+ dis_lgs+ +km+ yr, data=subset(pit_flow, ftt<600 & yr!=year), family=quasipoisson) # nice but ftt is not count
+# summary(fmdl2)
 
-require(lme4)
-year<- 2017
-fmmdl1<- lmer(log(ftt)~ jday+ dis_lgs+ (1|yr),
-  data=subset(pit_flow, ftt<600 & yr!=year))
+# might consider Box-Cox transformation
+MASS::boxcox(fmdl1, lambda = seq(-1.1, -0.8, 0.05)) # lambda=-0.95 without yr 2017
+
+# higher flow lower ftt? (can't really tell)
+par(mfrow=c(2,2))
+for(i in unique(pit_flow$yr)){
+  with(subset(pit_flow, yr==i&ftt<600), 
+    plot(dis_lgs, log(ftt), pch=20, main=i) )
+}
+
+for(i in unique(pit_flow$yr)){
+  with(subset(pit_flow, yr==i&ftt<600), 
+    plot(jday, dis_lgs, pch=20, main=i) )
+} # seasonality in flow
+
+for(i in unique(pit_flow$yr)){
+  with(subset(pit_flow, yr==i&ftt<600), 
+    plot(jday, log(ftt), pch=20, main=i) )
+} # don't see seasonality in ftt
+meds<- tapply(pit_flow$ftt, pit_flow$jday, function(x) median(x, na.rm=TRUE))
+plot(as.numeric(dimnames(meds)[[1]]), as.numeric(meds), pch=20) # here you see seasonalisy, but also coincide with flow
+ms<- tapply(pit_flow$ftt, pit_flow$jday, function(x) mean(x, na.rm=TRUE))
+plot(as.numeric(dimnames(ms)[[1]]), as.numeric(ms), pch=20)
+
+# release site and ftt
+boxplot(log(ftt)~km, data=pit_flow)
+
+# arrival distribution
+for(i in unique(pit_flow$yr)){
+  with(subset(pit_flow, yr==i), 
+    hist(jday, breaks=50, xlim=c(90, 200), main=i) )
+} 
+
+# mixed models
+require(arm)
+year<- 2008
+# pit_flow$jdays<- scale(pit_flow$jday)
+# pit_flow$dislgss<- scale(pit_flow$dis_lgs)
+# fmmdl1<- lmer(log(ftt)~ jday+ dis_lgs+ km+ (1|yr),
+#   data=subset(pit_flow, !yr%in%c(year,2017) & ftt<=600))
+# fmmdl1<- lmer(I(1/ftt)~ jday+ dis_lgs+ km+ (1|yr),
+#   data=subset(pit_flow, !yr%in%c(year,2017) & ftt<=600))
+fmmdl1<- lmer(I(1/ftt)~ jday+ dis_lgs+ km+ (1|mig_his)+ (1|yr),
+  data=subset(pitflow2, !yr%in%c(2011,year)) )
 plot(fmmdl1)
 summary(fmmdl1)
 
-betty<- fixef(fmmdl1)
-exp(betty[1]+ betty[2]*150+ betty[3]*80)
+nsim<- 100
+mdlsim<- sim(fmmdl1, n.sims=nsim)
+betties<- mdlsim@fixef
+# da_yr<- subset(pit_flow, yr==year)
+da_yr<- subset(pitflow2, yr==year)
+fttsim<- matrix(NA, nrow=nsim, ncol=nrow(da_yr))
+for(i in 1:nsim){
+  for(j in 1:nrow(da_yr)){
+  fttsim[i,j]<- 1/(betties[i,1]+ 
+      betties[i,2]*da_yr$jday[j]+ 
+      betties[i,3]*da_yr$dis_lgs[j]+
+      betties[i,4]*da_yr$km[j])
+  }
+}
 
+meds<- apply(fttsim, 1, median)
+quantile(meds, c(.025, .975))
+summary(meds)
+summary(subset(da_yr, jday<=190)$ftt)
 
 require(nlme)
-year<- 2018
-fmmdl1<- gls(log(ftt)~ jday+ dis_lgs, correlation= corAR1(), method='REML', data=subset(pit_flow, ftt<600 & yr!=year))
-fmmdl2<- lme(log(ftt)~ jday+ dis_lgs, random= ~1|yr, method='REML', data=subset(pit_flow, ftt<600 & yr!=year))
+year<- 2017
+# fmmdl1<- lme(log(ftt)~ jday+ dis_lgs+ km, random= ~1|yr, method='REML', data=subset(pit_flow, ftt<600 & yr!=year))
+# fmmdl2<- gls(log(ftt)~ jday+ dis_lgs, correlation= corAR1(), method='REML', data=subset(pit_flow, ftt<600 & yr!=year))
+# AIC(fmmdl1, fmmdl2) # corAR1 is not better 
+fmmdl1<- lme(I(1/ftt)~ jday+ dis_lgs+ km, random= ~1|yr, method='REML', data=subset(pit_flow, ftt<600 & yr!=year))
 
 windows()
 par(mfrow=c(2,1))
@@ -193,12 +247,6 @@ hist(resid(fmmdl1, type='normalized'), breaks=50, freq=F); curve(dnorm(x), add=T
 summary(fmmdl1)
 
 betty<- coef(fmdl1)
-exp(betty[1]+ betty[2]*140+ betty[3]*55) # low flow
-exp(betty[1]+ betty[2]*140+ betty[3]*75+ betty[4]) # med flow
-exp(betty[1]+ betty[2]*140+ betty[3]*110+ betty[5]) # high flow
-
-
-
 
 
 
