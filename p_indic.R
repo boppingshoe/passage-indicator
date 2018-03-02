@@ -119,7 +119,8 @@ ratio_est<- function(x, y){
 ratio_est(adop$lmn_1, adop$lgs)
 # ----
 
-# travel time and flow and stuff ----
+# travel time and flow and stuff
+# using lmn to lgs (2014- 2017) ----
 # loading and format data
 load(file= paste0(wd, '/data compile/pit_flow.Rdata'))
 
@@ -131,11 +132,6 @@ par(mfrow=c(2,2))
 for(i in unique(pit_flow$yr)){
   hist(subset(pit_flow, yr==i)$ftt, breaks=500, main=i,
     xlim=c(0, max(pit_flow$ftt, na.rm=TRUE)), ylim=c(0, 120))
-  print(summary(subset(pit_flow, yr==i)$ftt))
-}
-par(mfrow=c(3,5))
-for(i in unique(pitflow2$yr)){
-  hist(1/(subset(pitflow2, yr==i)$ftt), breaks=500, main=i)
   print(summary(subset(pit_flow, yr==i)$ftt))
 }
 for(i in unique(pit_flow$yr)){
@@ -152,7 +148,6 @@ mean(pit_flow$ftt>600, na.rm=TRUE) # <1%
 year<- 2018
 fmdl1<- lm(log(ftt)~ jday+ dis_lgs+ km+ yr, data=subset(pit_flow, ftt<600 & yr!=year))
 fmdl1<- lm(I(ftt^(-0.95))~ jday+ dis_lgs+ km+ yr, data=subset(pit_flow, ftt<600 & yr!=year))
-fmdl1<- lm(log(ftt)~ jday+ dis_lgs+ km+ yr, data=subset(pitflow2, ftt<600 & yr!=year))
 summary(fmdl1)
 par(mfrow=c(2,2))
 plot(fmdl1)
@@ -195,23 +190,20 @@ for(i in unique(pit_flow$yr)){
 
 # mixed models
 require(arm)
-year<- 2008
+year<- 2009
 # pit_flow$jdays<- scale(pit_flow$jday)
 # pit_flow$dislgss<- scale(pit_flow$dis_lgs)
 # fmmdl1<- lmer(log(ftt)~ jday+ dis_lgs+ km+ (1|yr),
 #   data=subset(pit_flow, !yr%in%c(year,2017) & ftt<=600))
-# fmmdl1<- lmer(I(1/ftt)~ jday+ dis_lgs+ km+ (1|yr),
-#   data=subset(pit_flow, !yr%in%c(year,2017) & ftt<=600))
-fmmdl1<- lmer(I(1/ftt)~ jday+ dis_lgs+ km+ (1|mig_his)+ (1|yr),
-  data=subset(pitflow2, !yr%in%c(2011,year)) )
+fmmdl1<- lmer(I(1/ftt)~ jday+ dis_lgs+ km+ (1|yr),
+  data=subset(pit_flow, !yr%in%c(year,2017) & ftt<=600))
 plot(fmmdl1)
 summary(fmmdl1)
 
 nsim<- 100
 mdlsim<- sim(fmmdl1, n.sims=nsim)
 betties<- mdlsim@fixef
-# da_yr<- subset(pit_flow, yr==year)
-da_yr<- subset(pitflow2, yr==year)
+da_yr<- subset(pit_flow, yr==year)
 fttsim<- matrix(NA, nrow=nsim, ncol=nrow(da_yr))
 for(i in 1:nsim){
   for(j in 1:nrow(da_yr)){
@@ -247,6 +239,81 @@ hist(resid(fmmdl1, type='normalized'), breaks=50, freq=F); curve(dnorm(x), add=T
 summary(fmmdl1)
 
 betty<- coef(fmdl1)
+
+# using data for ice to granite (2005-2017) ----
+load(file= paste0(wd, '/data compile/pitflow2.Rdata'))
+
+windows()
+par(mfrow=c(3,5))
+for(i in unique(pitflow2$yr)){
+  hist(1/(subset(pitflow2, yr==i)$ftt), breaks=500, main=i)
+  print(summary(subset(pit_flow, yr==i)$ftt))
+}
+
+# mixed models
+require(arm)
+year<- 2016
+fmmdl1<- lmer(I(1/ftt)~ jday+ dis_ihr+ km+ ihr_temp+ (1|mig_his)+ (1|yr),
+  data=subset(pitflow2, !yr %in% c(2011, year)) )
+plot(fmmdl1)
+summary(fmmdl1)
+
+getCI <- function(ms) {
+  result <- rep(NA, 6)
+  result[1] <- min(ms, na.rm = TRUE)
+  result[2] <- quantile(ms, 0.025)
+  result[3] <- median(ms, na.rm = TRUE)
+  result[4] <- mean(ms, na.rm = TRUE)
+  result[5] <- quantile(ms, 0.975)
+  result[6] <- max(ms, na.rm = TRUE)
+  return(result)
+}
+
+tt_func<- function(dat, year, strt='04-01', cutoff='06-30', nsim=100, use_median='t', mdl_summary='f'){
+  mmdl<- lmer(I(1/ftt)~ jday+ dis_ihr+ km+ ihr_temp+ (1|mig_his)+ (1|yr),
+    data=subset(dat, !yr %in% c(2011, year)) )
+  if(mdl_summary=='t') {print(summary(mmdl)); cat('\n')}
+  betties<- sim(mmdl, n.sims=nsim)@fixef
+  da_yr<- subset(dat, yr==year)
+  vmtx<- cbind(1, da_yr[,c('jday','dis_ihr','km','ihr_temp')])
+  fttsim<- 1/(betties %*% t(vmtx))
+
+  if(use_median=='t'){
+    ms<- apply(fttsim, 1, median)
+  } else {
+    ms<- apply(fttsim, 1, mean)
+  }
+  
+  Predicted<- getCI(ms)
+  st<- as.numeric(format(as.Date(paste0(year, '-', strt)), format='%j'))
+  en<- as.numeric(format(as.Date(paste0(year, '-', cutoff)), format='%j'))
+  Observed<- getCI(subset(da_yr, jday>=st & jday<=en)$ftt)
+  sumtab<- cbind(Predicted, Observed)
+  row.names(sumtab) <- c("Min.", "2.5%", "Median","Mean", "97.5%", "Max.")
+  output<- list()
+  output$sumtab<- sumtab
+  output$ms<- ms
+  return(output)
+}
+
+year<- 2016
+out<- tt_func(pitflow2, year, strt='04-01', cutoff='06-30', nsim=500)
+out$sumtab
+hist(out$ms, breaks=100, xlim= c(out$sumtab[1,2]+1, out$sumtab[4,2]))
+abline(v=out$sumtab[3,2], col='red', lwd=2)
+
+windows()
+par(mfrow=c(3,5))
+for (i in 2005:2017){
+  out<- tt_func(pitflow2, year=i, strt='04-01', cutoff='06-30', nsim=500)
+  obs_med<- out$sumtab[3,2]
+  hist(out$ms, breaks=100,
+    xlim= c(min(min(out$ms),obs_med)-1, max(max(out$ms),obs_med)+1), main=i)
+  abline(v=obs_med, col='red', lwd=2)
+}
+
+
+
 
 
 
