@@ -287,10 +287,12 @@ tt_func<- function(dat, year, strt='04-01', cutoff='06-30', nsim=100, use_median
   Predicted<- getCI(ms)
   st<- as.numeric(format(as.Date(paste0(year, '-', strt)), format='%j'))
   en<- as.numeric(format(as.Date(paste0(year, '-', cutoff)), format='%j'))
-  Observed<- getCI(subset(da_yr, jday>=st & jday<=en)$ftt)
+  sub_yr<- subset(da_yr, jday>=st & jday<=en)
+  Observed<- getCI(sub_yr$ftt)
   sumtab<- cbind(Predicted, Observed)
   row.names(sumtab) <- c("Min.", "2.5%", "Median","Mean", "97.5%", "Max.")
   output<- list()
+  output$n<- nrow(sub_yr)
   output$sumtab<- sumtab
   output$ms<- ms
   return(output)
@@ -299,9 +301,12 @@ tt_func<- function(dat, year, strt='04-01', cutoff='06-30', nsim=100, use_median
 year<- 2016
 out<- tt_func(pitflow2, year, strt='04-01', cutoff='06-30', nsim=500)
 out$sumtab
-hist(out$ms, breaks=100, xlim= c(out$sumtab[1,2]+1, out$sumtab[4,2]))
+cat('n = ', out$n)
+hist(out$ms, breaks=100,
+  xlim= c(min(min(out$ms),obs_med)-1, max(max(out$ms),obs_med)+1), main=year)
 abline(v=out$sumtab[3,2], col='red', lwd=2)
 
+# quick look at 2005 to 2017
 windows()
 par(mfrow=c(3,5))
 for (i in 2005:2017){
@@ -311,7 +316,6 @@ for (i in 2005:2017){
     xlim= c(min(min(out$ms),obs_med)-1, max(max(out$ms),obs_med)+1), main=i)
   abline(v=obs_med, col='red', lwd=2)
 }
-
 
 
 

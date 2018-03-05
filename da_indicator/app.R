@@ -3,7 +3,6 @@
 
 library(shiny)
 library(arm)
-load(file= 'data/adop.Rdata')
 load(file= 'data/ad_dat.Rdata')
 load(file= 'data/pitflow2.Rdata')
 options(scipen=999) # keep plot from displaying scientific notation
@@ -36,10 +35,12 @@ tt_func<- function(dat, year, strt, cutoff, nsim, use_median='t'){
   Predicted<- getCI(ms)
   st<- as.numeric(format(as.Date(paste0(year, '-', strt)), format='%j'))
   en<- as.numeric(format(as.Date(paste0(year, '-', cutoff)), format='%j'))
-  Observed<- getCI(subset(da_yr, jday>=st & jday<=en)$ftt)
+  sub_yr<- subset(da_yr, jday>=st & jday<=en)
+  Observed<- getCI(sub_yr$ftt)
   # Observed<- getCI(subset(da_yr, jday>=strt & jday<=cutoff)$ftt)
   sumtab<- cbind(c("Min.", "2.5%", "Median","Mean", "97.5%", "Max."),
     round(Predicted, 2), round(Observed, 2))
+  sumtab<- rbind(sumtab, cbind('n =',nrow(sub_yr),' '))
   colnames(sumtab)<- c(' ','Predicted','Observed')
   outtie<- list()
   outtie$sumtab<- sumtab
@@ -107,7 +108,7 @@ server <- function(input, output) {
     d91<- input$dat91
     if (d91==TRUE) {
       dat<- subset(ad_dat, lgs>0)
-    } else {dat<- adop}
+    } else {dat<- subset(ad_dat, obs_yr>=2009 & lgs>0)}
     da_yr<- pi_out()$da_yr
     
     # fitting a linear regression model and simulate predicted coefs
