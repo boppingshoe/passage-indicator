@@ -6,24 +6,29 @@ library(arm)
 load(file= 'data/ad_dat.Rdata')
 load(file= 'data/pitflow2.Rdata')
 options(scipen=999) # keep plot from displaying scientific notation
-
+# summary function
 getCI <- function(ms) {
   result <- rep(NA, 6)
   result[1] <- min(ms, na.rm = TRUE)
-  result[2] <- quantile(ms, 0.025)
+  result[2] <- quantile(ms, 0.025, na.rm = TRUE)
   result[3] <- median(ms, na.rm = TRUE)
   result[4] <- mean(ms, na.rm = TRUE)
-  result[5] <- quantile(ms, 0.975)
+  result[5] <- quantile(ms, 0.975, na.rm = TRUE)
   result[6] <- max(ms, na.rm = TRUE)
   return(result)
 }
-
-tt_func<- function(dat, year, strt, cutoff, nsim, use_median='t'){
+# travel time function
+tt_func<- function(dat, year, strt, cutoff, nsim=100, use_median='t'){
   mmdl<- lmer(I(1/ftt)~ jday+ dis_ihr+ km+ ihr_temp+ (1|mig_his)+ (1|yr),
     data=subset(dat, !yr %in% c(2011, year)) )
   betties<- sim(mmdl, n.sims=nsim)@fixef
-  da_yr<- subset(dat, yr==year)
-  vmtx<- cbind(1, da_yr[,c('jday','dis_ihr','km','ihr_temp')])
+  
+  st<- as.numeric(format(as.Date(paste0(year, '-', strt)), format='%j'))
+  en<- as.numeric(format(as.Date(paste0(year, '-', cutoff)), format='%j'))
+  # start date at ice, cutoff at granite
+  da_yr<- subset(dat, yr==year & jday>=st & (jday2<=en|is.na(jday2)))
+  vmtx<- cbind(1, subset(da_yr,# !is.na(ftt),
+    select=c('jday','dis_ihr','km','ihr_temp') ))
   fttsim<- 1/(betties %*% t(vmtx))
   
   if(use_median=='t'){
@@ -33,15 +38,17 @@ tt_func<- function(dat, year, strt, cutoff, nsim, use_median='t'){
   }
   
   Predicted<- getCI(ms)
-  st<- as.numeric(format(as.Date(paste0(year, '-', strt)), format='%j'))
-  en<- as.numeric(format(as.Date(paste0(year, '-', cutoff)), format='%j'))
-  sub_yr<- subset(da_yr, jday>=st & jday<=en)
-  Observed<- getCI(sub_yr$ftt)
-  # Observed<- getCI(subset(da_yr, jday>=strt & jday<=cutoff)$ftt)
+  Observed<- getCI(da_yr$ftt)
+  jday2sim<- t(t(fttsim)+ vmtx[,2])
+  con_all<- apply(jday2sim, 1, function(x) sum(ceiling(x)<=en)/nrow(da_yr) )
+  ExpectedConv<- getCI(con_all)
+
   sumtab<- cbind(c("Min.", "2.5%", "Median","Mean", "97.5%", "Max."),
-    round(Predicted, 2), round(Observed, 2))
-  sumtab<- rbind(sumtab, cbind('n =',nrow(sub_yr),' '))
-  colnames(sumtab)<- c(' ','Predicted','Observed')
+    round(Predicted, 3), round(Observed, 3), round(ExpectedConv, 3))
+  sumtab<- rbind(sumtab,
+    cbind('n =', nrow(da_yr), 'Obs Conv =', round(mean(!is.na(da_yr$jday2)),3)) )
+  colnames(sumtab)<- c(' ', 'Predicted FTT', 'Observed FTT', 'Predicted Conv')
+    
   outtie<- list()
   outtie$sumtab<- sumtab
   outtie$ms<- ms
@@ -51,10 +58,10 @@ tt_func<- function(dat, year, strt, cutoff, nsim, use_median='t'){
 # Define UI for application that... ----
 ui <- fluidPage(
    
-   # Application title
+  # Application title
    titlePanel("LGS Passage Indicator"),
    
-   # Sidebar with a slider input for which year to predict
+  # Sidebar with a slider input for which year to predict
   sidebarLayout(
     column(3,
       numericInput("year", 
@@ -80,14 +87,14 @@ ui <- fluidPage(
         plotOutput("passage_plot"),
         
         fluidRow(
-          column(4, tableOutput("travel_time")),
-          column(8, plotOutput("ftt_hist"))
+          column(6, tableOutput("travel_time")),
+          column(6, plotOutput("ftt_hist"))
         )
       )
    )
 )
 
-# Define server logic required to display a plot for expected counts -----
+# Define server logic required to display plots and table
 
 server <- function(input, output) {
   pi_out<- reactive({
@@ -96,13 +103,16 @@ server <- function(input, output) {
       po<- list()
       po$da_yr<- input$year
       po$nsim<- input$nsim
+      po$cutoff<- format(input$cutoff, format='%m-%d')
       return(po)
     })
   })
-  
+
+  # Display a plot for expected counts -----  
+
   output$passage_plot <- renderPlot({
     
-    # n_sim<- input$nsim
+    en<- as.numeric(format(as.Date(paste0(year, '-', pi_out()$cutoff)), format='%j'))
     n_sim<- pi_out()$nsim
     ran<- input$raneff
     d91<- input$dat91
@@ -122,7 +132,9 @@ server <- function(input, output) {
     sim1<- sim(mdl1, n.sims=n_sim)
 
     # plotting fish counts
-    with(ad_dat[ad_dat$obs_yr==da_yr,], 
+    plyr<- subset(ad_dat, 
+      obs_yr==da_yr & as.numeric(format(obs_date, format='%j'))<=en)
+    with(subset(ad_dat, obs_yr==da_yr), 
       plot(obs_date, cumsum(lgs), pch= 20, main= da_yr, ylim= c(0, sum(lgs)+10000),
         xlim= as.Date(c(paste0(da_yr,"-04-15"), paste0(da_yr,"-06-30"))),
         xaxt='n', xlab= NA, ylab= 'Cumulative Counts at LGS', ty='n'))
@@ -131,19 +143,19 @@ server <- function(input, output) {
     # plot predicted lgs counts as uncertainties
     for(i in 1:n_sim){
       if (ran==TRUE) {
-        with(subset(ad_dat, obs_yr==da_yr & lmn_1>0),
+        with(subset(plyr, lmn_1>0),#subset(ad_dat, obs_yr==da_yr & lmn_1>0),
           lines(obs_date, cumsum(exp(sim1@fixef[i, 1]+ sim1@fixef[i, 2]*log(lmn_1)) ),
             col='grey50'))
       } else{
-        with(subset(ad_dat, obs_yr==da_yr & lmn_1>0),
+        with(subset(plyr, lmn_1>0),#subset(ad_dat, obs_yr==da_yr & lmn_1>0),
           lines(obs_date, cumsum(exp(sim1@coef[i, 1]+ sim1@coef[i, 2]*log(lmn_1)) ),
             col='grey50'))
       }
     }
 
-         with(subset(ad_dat, obs_yr==da_yr), # observed lmn counts
+         with(subset(plyr, lmn_1>0),#subset(ad_dat, obs_yr==da_yr), # observed lmn counts
        lines(obs_date, cumsum(lmn_1), pch=20, lwd=3, col='blue'))
-     with(subset(ad_dat, obs_yr==da_yr), # observed lgs counts
+     with(subset(plyr, lmn_1>0),#subset(ad_dat, obs_yr==da_yr), # observed lgs counts
        lines(obs_date, cumsum(lgs), pch=20, lwd=3, col='red'))
      with(subset(ad_dat, obs_yr==da_yr),
        legend(min(obs_date)+12, sum(lgs)+7500,
@@ -151,7 +163,9 @@ server <- function(input, output) {
          lty=1, lwd=c(3,3,10), cex=1.2,
          col=c('blue','red','grey50'), bty='n'))
    })
-  
+
+  # Display travel time summary table and a histogram for distribution of median -----
+
   outtie<- reactive({
     n_sim<- pi_out()$nsim
     da_yr<- pi_out()$da_yr
@@ -176,6 +190,7 @@ server <- function(input, output) {
       text(obs_med, 3, labels = 'Observed Median')
     }
   })
+
 }
 
 # Run the application ----

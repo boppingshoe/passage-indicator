@@ -4,8 +4,10 @@
 rm(list=ls())
 wd<- "G:/STAFF/Bobby/adult passage"
 #
-
 # simulate expected lgs counts using observed lmn counts ----
+load(file= paste0(wd, '/data compile/ad_dat.Rdata'))
+load(file= paste0(wd, '/data compile/adop.Rdata'))
+
 library(arm)
 
 indc_func<- function(da_yr, n_sim=100, ran='n'){
@@ -252,19 +254,37 @@ for(i in unique(pitflow2$yr)){
 
 # mixed models
 require(arm)
-year<- 2016
-fmmdl1<- lmer(I(1/ftt)~ jday+ dis_ihr+ km+ ihr_temp+ (1|mig_his)+ (1|yr),
-  data=subset(pitflow2, !yr %in% c(2011, year)) )
+year<- 2018
+# fmmdl3<- lmer(I(1/ftt)~ scale(jday)+ I(scale(ihr_temp)^2)+ scale(ihr_temp)+ I(scale(dis_ihr)^2)+ scale(dis_ihr)+ scale(km)+ (1|mig_his)+ (1|yr), data=subset(pitflow2, !yr %in% c(2011, year)) )
+# fmmdl1<- lmer(I(1/ftt)~ jday+ ihr_temp+ I(dis_ihr^2)+ dis_ihr+ km+ (1|mig_his)+ (1|yr), data=subset(pitflow2, !yr %in% c(2011, year)) )
+fmmdl1<- lmer(I(1/ftt)~ jday+ ihr_temp+ dis_ihr+ km+ (1|mig_his)+ (1|yr), data=subset(pitflow2, !yr %in% c(2011, year)) )
+#
+vif.lme <- function (fit) {
+  ## adapted from rms::vif
+  v <- vcov(fit)
+  nam <- names(fixef(fit))
+  ## exclude intercepts
+  ns <- sum(1 * (nam == "Intercept" | nam == "(Intercept)"))
+  if (ns > 0) {
+    v <- v[-(1:ns), -(1:ns), drop = FALSE]
+    nam <- nam[-(1:ns)] }
+  d <- diag(v)^0.5
+  v <- diag(solve(v/(d %o% d)))
+  names(v) <- nam
+  v }
+
+vif.lme(fmmdl1)
+
 plot(fmmdl1)
 summary(fmmdl1)
 
 getCI <- function(ms) {
   result <- rep(NA, 6)
   result[1] <- min(ms, na.rm = TRUE)
-  result[2] <- quantile(ms, 0.025)
+  result[2] <- quantile(ms, 0.025, na.rm = TRUE)
   result[3] <- median(ms, na.rm = TRUE)
   result[4] <- mean(ms, na.rm = TRUE)
-  result[5] <- quantile(ms, 0.975)
+  result[5] <- quantile(ms, 0.975, na.rm = TRUE)
   result[6] <- max(ms, na.rm = TRUE)
   return(result)
 }
@@ -274,8 +294,13 @@ tt_func<- function(dat, year, strt='04-01', cutoff='06-30', nsim=100, use_median
     data=subset(dat, !yr %in% c(2011, year)) )
   if(mdl_summary=='t') {print(summary(mmdl)); cat('\n')}
   betties<- sim(mmdl, n.sims=nsim)@fixef
-  da_yr<- subset(dat, yr==year)
-  vmtx<- cbind(1, da_yr[,c('jday','dis_ihr','km','ihr_temp')])
+  
+  st<- as.numeric(format(as.Date(paste0(year, '-', strt)), format='%j'))
+  en<- as.numeric(format(as.Date(paste0(year, '-', cutoff)), format='%j'))
+  
+  da_yr<- subset(dat, yr==year & jday>=st & (jday2<=en|is.na(jday2)))
+  vmtx<- cbind(1, subset(da_yr, !is.na(ftt),
+    select=c('jday','dis_ihr','km','ihr_temp') ))
   fttsim<- 1/(betties %*% t(vmtx))
 
   if(use_median=='t'){
@@ -285,23 +310,32 @@ tt_func<- function(dat, year, strt='04-01', cutoff='06-30', nsim=100, use_median
   }
   
   Predicted<- getCI(ms)
-  st<- as.numeric(format(as.Date(paste0(year, '-', strt)), format='%j'))
-  en<- as.numeric(format(as.Date(paste0(year, '-', cutoff)), format='%j'))
-  sub_yr<- subset(da_yr, jday>=st & jday<=en)
-  Observed<- getCI(sub_yr$ftt)
+  jday2sim<- t(t(fttsim)+ vmtx[,2])
+  con_all<- apply(jday2sim, 1, function(x) sum(ceiling(x)<=en)/nrow(da_yr) )
+  con_pre<- cbind(getCI(con_all))
+  row.names(con_pre) <- c("Min.", "2.5%", "Median","Mean", "97.5%", "Max.")
+  # sub_yr<- subset(da_yr, jday>=st & jday2<=en)
+  
+  Observed<- getCI(da_yr$ftt)
+  
   sumtab<- cbind(Predicted, Observed)
   row.names(sumtab) <- c("Min.", "2.5%", "Median","Mean", "97.5%", "Max.")
   output<- list()
-  output$n<- nrow(sub_yr)
+  output$n<- nrow(da_yr)
   output$sumtab<- sumtab
   output$ms<- ms
+  output$con_obs<- mean(!is.na(da_yr$jday2))
+  output$con_pre<- con_pre
   return(output)
 }
 
 year<- 2016
-out<- tt_func(pitflow2, year, strt='04-01', cutoff='06-30', nsim=500)
+out<- tt_func(pitflow2, year, strt='04-01', cutoff='05-01', nsim=200)
 out$sumtab
 cat('n = ', out$n)
+cat('Expected conversion rate = '); out$con_pre
+cat('Observed conversion rate = ', out$con_obs)
+obs_med<- out$sumtab[3,2]
 hist(out$ms, breaks=100,
   xlim= c(min(min(out$ms),obs_med)-1, max(max(out$ms),obs_med)+1), main=year)
 abline(v=out$sumtab[3,2], col='red', lwd=2)
