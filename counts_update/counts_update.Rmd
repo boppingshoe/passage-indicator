@@ -209,7 +209,10 @@ kms2<- cbind(as.numeric(substr(pitflow2$river_km, 5,7)),
   as.numeric(substr(pitflow2$river_km, 21,23)))
 pitflow2$km<- rowSums(kms2, na.rm=TRUE)
 pitflow2$tag_site<- trimws(pitflow2$tag_site)
-# pitflow2$fth<- round(pitflow2$ftt*24) # travel time in hours
+pitflow2$sjday<- scale(pitflow2$jday)
+pitflow2$sdis_ihr<- scale(pitflow2$dis_ihr)
+pitflow2$skm<- scale(pitflow2$km)
+pitflow2$sihr_temp<- scale(pitflow2$ihr_temp)
 # data exclude traps
 pitflow2<- subset(pitflow2, !tag_site %in% c('CLWTRP','GRNTRP','IMNTRP','SNKTRP'))
 # bring temper data (from above) in 
