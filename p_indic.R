@@ -255,21 +255,14 @@ for(i in unique(pitflow2$yr)){
 # mixed models
 require(arm)
 year<- 2017
-pitflow2$sjday<- scale(pitflow2$jday)
-pitflow2$sdis_ihr<- scale(pitflow2$dis_ihr)
-pitflow2$skm<- scale(pitflow2$km)
-pitflow2$sihr_temp<- scale(pitflow2$ihr_temp)
-
-# fmmdl3<- lmer(I(1/ftt)~ scale(jday)+ I(scale(ihr_temp)^2)+ scale(ihr_temp)+ I(scale(dis_ihr)^2)+ scale(dis_ihr)+ scale(km)+ (1|mig_his)+ (1|yr), data=subset(pitflow2, !yr %in% c(2011, year)) )
-# fmmdl1<- lmer(I(1/ftt)~ jday+ ihr_temp+ I(dis_ihr^2)+ dis_ihr+ km+ (1|mig_his)+ (1|yr), data=subset(pitflow2, !yr %in% c(2011, year)) )
-
+# looking at model manually ----
+# inverse gaussian is much slower in comupting, but mathematically more legit
 fmmdl1<- glmer(ftt~ sjday+ sdis_ihr+ skm+ sihr_temp+ mig_his+ (1|yr),
   data=subset(pitflow2, !yr %in% c(2011, year)),
   # family=Gamma(link='inverse') )
   family=inverse.gaussian(link='identity') )
 fmmdl2<- lmer(I(1/ftt)~ scale(jday)+ scale(ihr_temp)+ scale(dis_ihr)+ scale(km)
-  + mig_his+ (1|yr),
-  data=subset(pitflow2, !yr %in% c(2011, year)) )
+  + mig_his+ (1|yr), data=subset(pitflow2, !yr %in% c(2011, year)) )
 #
 vif.lme <- function (fit) {
   ## adapted from rms::vif
@@ -292,6 +285,7 @@ m_fit<- fitted(fmmdl1)
 plot(m_fit, m_res)
 plot(fmmdl2)
 summary(fmmdl2)
+# ----
 
 getCI <- function(ms) {
   result <- rep(NA, 6)
@@ -303,25 +297,7 @@ getCI <- function(ms) {
   result[6] <- max(ms, na.rm = TRUE)
   return(result)
 }
-
-yr<- 2015
-n_sim<- 200
-dat<- pitflow2
-nsim<- n_sim
-year<- yr
-strt='04-01'; cutoff='06-30'
-
-tt_func<- function(dat, year, strt='04-01', cutoff='06-30', nsim=100, use_median='t', mdl_summary='f'){
-  # specify model
-  # mmdl<- lmer(I(1/ftt)~ jday+ dis_ihr+ km+ ihr_temp+ (1|mig_his)+ (1|yr),
-  #   data=subset(dat, !yr %in% c(2011, year)) )
-  mmdl<- glmer(ftt~ sjday+ sdis_ihr+ skm+ sihr_temp+ mig_his+ (1|yr),
-      data=subset(dat, !yr %in% c(2011, year)),
-    family=inverse.gaussian(link='identity') )
-  if(mdl_summary=='t') {print(summary(mmdl)); cat('\n')}
-  
-  betties<- sim(mmdl, n.sims=nsim)@fixef # simulation
-  # betties<- sim(mmdl, n.sims=nsim)@coef
+tt_func<- function(dat, betties, year, strt, cutoff, realtime_adj='f', inv_gau='f'){
   # specify start and cutoff dates
   st<- as.numeric(format(as.Date(paste0(year, '-', strt)), format='%j'))
   en<- as.numeric(format(as.Date(paste0(year, '-', cutoff)), format='%j'))
@@ -334,56 +310,66 @@ tt_func<- function(dat, year, strt='04-01', cutoff='06-30', nsim=100, use_median
   subdat$surv<- rbinom(nrow(subdat), 1, 0.96)
   subdat2<- subset(subdat, surv==1)
   
-  # vmtx<- cbind(1, subset(subdat, select=c('jday','dis_ihr','km','ihr_temp') ))
-  vmtx<- cbind(1, subset(subdat2,
-    select=c('sjday','sdis_ihr','skm','sihr_temp','mig_his') ))
-  vmtx$mig_his<- ifelse(vmtx$mig_his=='trans', 1, 0) 
-  # vmtx<- cbind(rep(1, nrow(subdat)))
-  # fttsim<- 1/(betties %*% t(vmtx))
-  fttsim<- betties %*% t(vmtx)
-  
-
-  if(use_median=='t'){
-    ms<- apply(fttsim, 1, median)
-  } else {
-    ms<- apply(fttsim, 1, mean)
+  if(inv_gau=='f'){
+    vmtx<- cbind(1, subset(subdat2,
+      select=c('jday','dis_ihr','km','ihr_temp','mig_his') ))
+    vmtx$mig_his<- ifelse(vmtx$mig_his=='trans', 1, 0) 
+    fttsim<- 1/(betties %*% t(vmtx))
+  } else{
+     # for inverse gaussian
+    vmtx<- cbind(1, subset(subdat2,
+      select=c('sjday','sdis_ihr','skm','sihr_temp','mig_his') ))
+    vmtx$mig_his<- ifelse(vmtx$mig_his=='trans', 1, 0) 
+    fttsim<- betties %*% t(vmtx)
   }
   
-  # travel time
-  Observed<- getCI(subdat$ftt)
-  Predicted<- getCI(ms)
   # conversion rate
-  # jday2sim<- t(t(fttsim)+ subdat$jday)
-  # con_all<- apply(jday2sim, 1, function(x) sum(ceiling(x)<=en)/nrow(subdat) )
-  # con_pre<- cbind(getCI(con_all))
-  # row.names(con_pre) <- c("Min.", "2.5%", "Median", "Mean", "97.5%", "Max.")
   jday2sim<- t(t(fttsim)+ subdat2$jday)
   con_all<- apply(jday2sim, 1, function(x) sum(ceiling(x)<=en)/nrow(subdat) )
   con_pre<- cbind(getCI(con_all))
   row.names(con_pre) <- c("Min.", "2.5%", "Median", "Mean", "97.5%", "Max.")
+  # travel time
+  if(realtime_adj=='f'){
+    Observed<- getCI(subdat$ftt)
+  } else {
+    subadj<- subset(dat, yr==year & jday>=st & jday<=en)
+    Observed<- getCI(subadj$ftt)
+  }
+  ms<- apply(fttsim, 1, median)
+  Predicted<- getCI(ms)
+  
   
   sumtab<- cbind(Predicted, Observed)
   row.names(sumtab) <- c("Min.", "2.5%", "Median", "Mean", "97.5%", "Max.")
   # pit-tag counts
   ihr_ct<- table(subdat$jday)
   gra_ct<- with(subdat, tapply(jday2, jday, function(x) sum(!is.na(x))))
-  # gra_pre<- apply(jday2sim, 1, 
-  #   function(x) tapply(x, subdat$jday, function(x) sum(ceiling(x)<=en) ))
   gra_pre<- apply(jday2sim, 1,
     function(x) tapply(x, subdat2$jday, function(x) sum(ceiling(x)<=en) ))
-  pit_ct<- cbind(cbind(ihr_ct), cbind(gra_ct), gra_pre)
+  pit_ct<- cbind(ihr_ct, gra_ct, gra_pre)
   
   output<- list()
   output$n<- nrow(subdat)
   output$sumtab<- sumtab
   output$ms<- ms
   output$con_obs<- mean(!is.na(subdat$jday2))
+  output$con_all<- con_all
   output$con_pre<- con_pre
   output$pit_ct<- pit_ct
   return(output)
 }
-
-out<- tt_func(pitflow2, year=yr, strt='04-01', cutoff='06-30', nsim=n_sim)
+#
+# snap shot ----
+year<- 2017
+nsim<- 200
+# specify model
+mmdl<- lmer(I(1/ftt)~ jday+ dis_ihr+ km+ ihr_temp+ mig_his+ (1|yr),
+  data=subset(pitflow2, !yr %in% c(2011, year)) )
+# mmdl<- glmer(ftt~ sjday+ sdis_ihr+ skm+ sihr_temp+ mig_his+ (1|yr),
+#   data=subset(pitflow2, !yr %in% c(2011, year)),
+#   family=inverse.gaussian(link='identity') )
+betties<- sim(mmdl, n.sims=nsim)@fixef # simulation
+out<- tt_func(pitflow2, betties, year, strt='04-01', cutoff='06-30')
 out$sumtab
 cat('n = ', out$n)
 cat('Expected conversion rate = '); out$con_pre
@@ -391,16 +377,139 @@ cat('Observed conversion rate = ', out$con_obs)
 obs_med<- out$sumtab[3,2]
 # histogram for ftt median
 hist(out$ms, breaks=100,
-  xlim= c(min(min(out$ms),obs_med)-1, max(max(out$ms),obs_med)+1), main=yr)
+  xlim= c(min(min(out$ms),obs_med)-1, max(max(out$ms),obs_med)+1), main=year)
 abline(v=obs_med, col='red', lwd=2)
 
 # cumulative counts using pit-tags
-plot(cumsum(out$pit_ct[,1]), pch=20, main=yr, ylim=c(0, sum(out$pit_ct[,1])+100), xlab=NA, ylab='Cumulative PIT-tag Counts', ty='n')
-for(s in 1:n_sim){
+mmdl<- lmer(I(1/ftt)~ jday+ dis_ihr+ km+ ihr_temp+ mig_his+ (1|yr),
+  data=subset(pitflow2, !yr %in% c(2011, year)) )
+# mmdl<- glmer(ftt~ sjday+ sdis_ihr+ skm+ sihr_temp+ mig_his+ (1|yr),
+#   data=subset(pitflow2, !yr %in% c(2011, year)),
+#   family=inverse.gaussian(link='identity') )
+betties<- sim(mmdl, n.sims=nsim)@fixef # simulation
+plot(cumsum(out$pit_ct[,1]), pch=20, main=year, ylim=c(0, sum(out$pit_ct[,1])+100), xlab=NA, ylab='Cumulative PIT-tag Counts', ty='n')
+for(s in 1:nsim){
     lines(cumsum(out$pit_ct[,s+2]), col='grey50')
 }
 lines(cumsum(out$pit_ct[,1]), pch=20, lwd=2, col='blue')
 lines(cumsum(out$pit_ct[,2]), pch=20, lwd=2, col='red')
+
+# summary look ----
+year<-2017; start<-'05-10'; end<-'06-30'
+a<- as.Date(paste0(year, '-', start))
+b<-as.Date(paste0(year, '-', end))
+allDates <- format(seq(a, b, 'day'), format='%m-%d')
+nsim<- 100
+
+prep_out<- prep_it(pitflow2, year, allDates, inverse_gau='t', adj='t')
+plot_it(a, b, prep_out$ftt_obs, prep_out$ftt_pre, prep_out$conv_obs, prep_out$conv_pre)
+
+# specify model ----
+# mmdl<- lmer(I(1/ftt)~ jday+ dis_ihr+ km+ ihr_temp+ mig_his+ (1|yr),
+#   data=subset(pitflow2, !yr %in% c(2011, year)) )
+mmdl<- glmer(ftt~ sjday+ sdis_ihr+ skm+ sihr_temp+ mig_his+ (1|yr),
+  data=subset(pitflow2, !yr %in% c(2011, year)),
+  family=inverse.gaussian(link='identity') )
+betties<- sim(mmdl, n.sims=nsim)@fixef # simulation
+#
+ftt_pre<- matrix(NA, nrow=3, ncol=length(allDates))
+ftt_obs<- rep(NA, length(allDates))
+conv_pre<- matrix(NA, nrow=3, ncol=length(allDates))
+conv_obs<- rep(NA, length(allDates))
+
+for(i in 1:length(allDates)){
+  out<- tt_func(pitflow2, betties, year, strt='04-01', cutoff=allDates[i], inv_gau='t')
+  # travel time
+  ftt_pre[,i]<- out$sumtab[c(1,3,6),1]
+  ftt_obs[i]<- out$sumtab[3,2]
+  # conversion
+  conv_pre[,i]<- out$con_pre[c(1,4,6),1]
+  conv_obs[i]<- out$con_obs
+}
+# ----
+windows()
+par(mfrow=c(2,1))
+#
+
+prep_it<- function(dat, year, allDates, inverse_gau='t', adj){
+  # specify model
+  if(inverse_gau=='f'){
+    mmdl<- lmer(I(1/ftt)~ jday+ dis_ihr+ km+ ihr_temp+ mig_his+ (1|yr),
+      data=subset(pitflow2, !yr %in% c(2011, year)) )
+  } else{
+    mmdl<- glmer(ftt~ sjday+ sdis_ihr+ skm+ sihr_temp+ mig_his+ (1|yr),
+      data=subset(dat, !yr %in% c(2011, year)),
+      family=inverse.gaussian(link='identity') )
+  }
+  betties<- sim(mmdl, n.sims=nsim)@fixef # simulation
+  #
+  prep_out<- list()
+  prep_out$ftt_pre<- matrix(NA, nrow=3, ncol=length(allDates))
+  prep_out$ftt_obs<- rep(NA, length(allDates))
+  prep_out$conv_pre<- matrix(NA, nrow=3, ncol=length(allDates))
+  prep_out$conv_obs<- rep(NA, length(allDates))
+  
+  for(i in 1:length(allDates)){
+    out<- tt_func(dat, betties, year, strt='04-01', cutoff=allDates[i],
+      realtime_adj=adj, inv_gau=inverse_gau)
+    # travel time
+    prep_out$ftt_pre[,i]<- out$sumtab[c(1,3,6),1]
+    prep_out$ftt_obs[i]<- out$sumtab[3,2]
+    # conversion
+    prep_out$conv_pre[,i]<- out$con_pre[c(1,4,6),1]
+    prep_out$conv_obs[i]<- out$con_obs
+  }
+  return(prep_out)
+}
+
+plot_it<- function(a, b, ftt_obs, ftt_pre, conv_obs, conv_pre){
+  # ftt
+  plot(a,0, xlim=c(a,b),
+  ylim=c(min(min(ftt_obs, na.rm=TRUE), min(ftt_pre, na.rm=TRUE))-0.5,
+    max(max(ftt_obs, na.rm=TRUE), max(ftt_pre, na.rm=TRUE))+0.5),
+  main=year, xlab=NA, ylab='Fish Travel Time (day)', ty='n')
+  # apply(ftt_pre, 1, function(x) lines(seq(a, b, 'day'), x, col='grey50'))
+  # lines(seq(a, b, 'day'), apply(ftt_pre, 2, median), lty=2)
+  lines(seq(a, b, 'day'), ftt_pre[1,], lty=2, lwd=2)
+  lines(seq(a, b, 'day'), ftt_pre[2,], lty=1, lwd=2)
+  lines(seq(a, b, 'day'), ftt_pre[3,], lty=2, lwd=2)
+  lines(seq(a, b, 'day'), ftt_obs, lwd=3, col='red')
+  # conv
+  plot(a,0, xlim=c(a,b),
+    ylim=c(min(min(conv_obs, na.rm=TRUE), min(conv_pre, na.rm=TRUE))-0.05, 1),
+    main=year, xlab=NA, ylab='Conversion', ty='n')
+  lines(seq(a, b, 'day'), conv_pre[1,], lty=2, lwd=2)
+  lines(seq(a, b, 'day'), conv_pre[2,], lty=1, lwd=2)
+  lines(seq(a, b, 'day'), conv_pre[3,], lty=2, lwd=2)
+  lines(seq(a, b, 'day'), conv_obs, lwd=3, col='coral')
+}
+
+# make summary plots
+par(mfrow=c(3,4))
+years2c<- 2005:2010
+years2c<- 2012:2017
+start<-'05-05'; end<-'06-30'
+nsim<- 100
+for(year in years2c){
+  a<- as.Date(paste0(year, '-', start))
+  b<-as.Date(paste0(year, '-', end))
+  allDates <- format(seq(a, b, 'day'), format='%m-%d')
+  
+  prep_out<- prep_it(pitflow2, year, allDates, inverse_gau='t', adj='t')
+  plot_it(a, b, prep_out$ftt_obs, prep_out$ftt_pre,
+    prep_out$conv_obs, prep_out$conv_pre)
+}
+#
+
+
+
+
+
+
+
+
+# ----
+
 
 # quick look at 2005 to 2017 ftt
 windows()
@@ -413,6 +522,7 @@ for (i in 2005:2017){
   abline(v=obs_med, col='red', lwd=2)
 }
 
+# quick look on conversion ----
 pitflow2$surv<- ifelse(is.na(pitflow2$ftt), 0, 1)
 smd<- glm(surv~ 1, data=pitflow2, family=binomial)
 summary(smd)
