@@ -66,18 +66,20 @@ channel <- odbcDriverConnect("case=nochange;Description=Global;
   WSID=CUTTHROAT;DATABASE=PITGLOBAL;Network=DBMSSOCN")
 
 xich <- sqlQuery(channel, "
-  select a.tag_id, a.ich_obs, a.gra_obs, a.srrt,
-    a.river_km, a.tag_site, a.capture_di,
+  select a.tag_id, a.boa_obs, a.mca_obs, a.ich_obs, a.gra_obs,
+    a.srrt, a.river_km, a.tag_site, a.capture_di, a.tag_date, a.rel_date,
   'mig_his' = case
   WHEN CHARINDEX('2', a.capture_di) = 0 THEN 'river'
   else 'trans'
   end
   
   from PITGLOBAL.dbo.[INTERROGATION BY SITE] a
+  --where a.srrt IN ('11H', '11W', '12H', '12W') AND
   where substring(a.srrt, 1, 1) in ('1') and
   a.ich_obs is not null
   and datepart(mm, a.ich_obs) in ('4','5','6')
-  and datepart(yyyy, a.ich_obs) between '2005' and '2018'
+  --and a.migr_yr between '2003' and '2015'
+  and datepart(yyyy, a.ich_obs) between '2005' and '2017'
   
   order by ich_obs, tag_id  
   ")
@@ -188,13 +190,16 @@ td$site<- 'IDSW'
 # format pittag data and merge with flow and temper data ----
 xich$obs_date<- as.Date(xich$ich_obs, format='%Y-%m-%d')
 xich$yr<- format(xich$ich_obs, format='%Y')
+xich<- subset(xich, (yr==format(boa_obs, format='%Y')|yr==format(mca_obs, format='%Y')) & obs_date-as.Date(rel_date, format='%Y-%m-%d')>365)
 xich$jday<- as.numeric(format(xich$ich_obs, format='%j'))
-pitflow2<- merge(xich, flow_dat, by= 'obs_date') # bring in flow data
+xich$jday2<- as.numeric(format(xich$gra_obs, format='%j'))
+
+pitflow2<- merge(xich, flow_dat, by= 'obs_date') # flow_dat from above
 pitflow2$ftt<- with(pitflow2, gra_obs-ich_obs)
 pitflow2$ftt<- as.numeric(pitflow2$ftt)
-pitflow2<- subset(pitflow2, (ftt>0 & ftt<100)) # get rid of is.na(ftt)
+pitflow2<- subset(pitflow2, (ftt>0 & ftt<100)|is.na(ftt))
 pitflow2<- pitflow2[substr(pitflow2$river_km, 1, 3)==522 & 
-    substr(pitflow2$river_km, 5, 7)>=173,] # get rid of fish below grinite
+    substr(pitflow2$river_km, 5, 7)>=173,] # get rid of fish below lgr
 pitflow2$flow<- ifelse(pitflow2$dis_ihr>100, '3high',
   ifelse(pitflow2$dis_ihr<60, '1low', '2med'))
 kms2<- cbind(as.numeric(substr(pitflow2$river_km, 5,7)),
@@ -204,11 +209,10 @@ kms2<- cbind(as.numeric(substr(pitflow2$river_km, 5,7)),
   as.numeric(substr(pitflow2$river_km, 21,23)))
 pitflow2$km<- rowSums(kms2, na.rm=TRUE)
 pitflow2$tag_site<- trimws(pitflow2$tag_site)
-# exclude trapy tag sites
-pitflow2<- subset(pitflow2,
-  !tag_site %in% c('CLWTRP','GRNTRP','IMNTRP','SNKTRP'))
-
-# bring in temper data
+# pitflow2$fth<- round(pitflow2$ftt*24) # travel time in hours
+# data exclude traps
+pitflow2<- subset(pitflow2, !tag_site %in% c('CLWTRP','GRNTRP','IMNTRP','SNKTRP'))
+# bring temper data (from above) in 
 td_temp<- td[,c(1,3)]
 names(td_temp)<- c('obs_date', 'ihr_temp')
 pitflow2<- merge(pitflow2, td_temp, by= 'obs_date')
