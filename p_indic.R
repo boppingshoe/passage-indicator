@@ -339,6 +339,7 @@ mmdl<- lmer(I(1/ftt)~ jday+ dis_ihr+ km+ ihr_temp+ mig_his+ (1|yr),
 #   data=subset(pitflow2, !yr %in% c(2011, year)),
 #   family=inverse.gaussian(link='identity') )
 betties<- sim(mmdl, n.sims=nsim)@fixef # simulation
+
 out<- tt_func(pitflow2, betties, year, strt='04-01', cutoff='06-30')
 out$sumtab
 cat('n = ', out$n)

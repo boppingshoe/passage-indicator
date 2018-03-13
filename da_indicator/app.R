@@ -6,10 +6,7 @@ library(arm)
 load(file= 'data/ad_dat.Rdata')
 load(file= 'data/pitflow2.Rdata')
 options(scipen=999) # keep plot from displaying scientific notation
-# pitflow2$sjday<- scale(pitflow2$jday)
-# pitflow2$sdis_ihr<- scale(pitflow2$dis_ihr)
-# pitflow2$skm<- scale(pitflow2$km)
-# pitflow2$sihr_temp<- scale(pitflow2$ihr_temp)
+
 # summary function
 getCI <- function(ms) {
   result <- rep(NA, 6)
@@ -22,13 +19,8 @@ getCI <- function(ms) {
   return(result)
 }
 # travel time function
-tt_func<- function(dat, year, strt, cutoff, nsim=100, use_median='t'){
-  mmdl<- lmer(I(1/ftt)~ jday+ dis_ihr+ km+ ihr_temp+ mig_his+ (1|yr),
-    data=subset(dat, !yr %in% c(2011, year)) )
-  # mmdl<- glmer(ftt~ sjday+ sdis_ihr+ skm+ sihr_temp+ mig_his+ (1|yr),
-  #   data=subset(dat, !yr %in% c(2011, year)),
-  #   family=inverse.gaussian(link='identity') ) # slow!
-  betties<- sim(mmdl, n.sims=nsim)@fixef
+tt_func<- function(dat, betties, year, strt, cutoff){
+
   # specify start and cutoff dates
   st<- as.numeric(format(as.Date(paste0(year, '-', strt)), format='%j'))
   en<- as.numeric(format(as.Date(paste0(year, '-', cutoff)), format='%j'))
@@ -36,26 +28,16 @@ tt_func<- function(dat, year, strt, cutoff, nsim=100, use_median='t'){
   subdat<- subset(dat, yr==year & jday>=st & jday<=en)
   subdat[subdat$jday2>en|is.na(subdat$jday2), c('jday2','ftt')]<- NA
   
-  
   # simulate for mortality
   subdat$surv<- rbinom(nrow(subdat), 1, 0.96)
   subdat2<- subset(subdat, surv==1)
+  
   vmtx<- cbind(1, subset(subdat2,
-    select=c('jday','dis_ihr','km','ihr_temp','mig_his') ))
+    select=c('sjday','sdis_ihr','skm','sihr_temp','mig_his') ))
   vmtx$mig_his<- ifelse(vmtx$mig_his=='trans', 1, 0)
-  fttsim<- 1/(betties %*% t(vmtx))
-  # for glmer inverse guassian model
-  # vmtx<- cbind(1, subset(subdat2,
-  #   select=c('sjday','sdis_ihr','skm','sihr_temp','mig_his') ))
-  # vmtx$mig_his<- ifelse(vmtx$mig_his=='trans', 1, 0)
-  # fttsim<- betties %*% t(vmtx) 
-  
-  if(use_median=='t'){
-    ms<- apply(fttsim, 1, median)
-  } else {
-    ms<- apply(fttsim, 1, mean)
-  }
-  
+  fttsim<- betties %*% t(vmtx)
+  ms<- apply(fttsim, 1, median)
+
   # travel time
   Predicted<- getCI(ms)
   Observed<- getCI(subdat$ftt)
@@ -79,10 +61,12 @@ tt_func<- function(dat, year, strt, cutoff, nsim=100, use_median='t'){
   out$sumtab<- sumtab
   out$ms<- ms
   out$pit_ct<- pit_ct
+  out$en<- en
   return(out)
 }
 
-# Define UI for application that... ----
+# Define UI for application that...
+# make sliders and buttons ----
 ui <- fluidPage(
    
   # Application title
@@ -124,7 +108,7 @@ ui <- fluidPage(
    )
 )
 
-# Define server logic required to display plots and table
+# Define server logic required to display plots and table ----
 
 server <- function(input, output) {
   pi_out<- reactive({
@@ -138,32 +122,68 @@ server <- function(input, output) {
     })
   })
 
-  # Display a plot for expected counts -----  
-
-  output$passage_plot <- renderPlot({
-    
+  # travel time model calculate here ----
+  tt_betties<- reactive({
     da_yr<- pi_out()$da_yr
-    en<- as.numeric(format(as.Date(paste0(da_yr, '-', pi_out()$cutoff)), format='%j'))
     n_sim<- pi_out()$nsim
+    
+    mmdl<- glmer(ftt~ sjday+ sdis_ihr+ skm+ sihr_temp+ mig_his+ (1|yr),
+      data=subset(pitflow2, !yr %in% c(2011, da_yr)),
+      family=inverse.gaussian(link='identity') )
+    betties<- sim(mmdl, n.sims=n_sim)@fixef # simulation
+    return(betties)
+  })
+  
+  outtie<- reactive({
+    n_sim<- pi_out()$nsim
+    da_yr<- pi_out()$da_yr
+    betties<- tt_betties()
+    strt<- format(input$strt, format='%m-%d')
+    cutoff<- format(input$cutoff, format='%m-%d')
+    tt_func(pitflow2, betties, da_yr, strt, cutoff)
+  })
+  
+  # Display a plot for expected counts ----
+
+  ct_mdl<- reactive({
+    da_yr<- pi_out()$da_yr
+    n_sim<- pi_out()$nsim
+    
     ran<- input$raneff
     d91<- input$dat91
+    # fitting a linear regression model and simulate predicted coefs
     if (d91==TRUE) {
       dat<- subset(ad_dat, lgs>0)
     } else {dat<- subset(ad_dat, obs_yr>=2009 & lgs>0)}
     
-    # fitting a linear regression model and simulate predicted coefs
     if (ran==TRUE) {
       mdl1<- lmer(log(lgs)~ log(lmn_1)+ (log(lmn_1)|obs_yr), 
         data= subset(dat, lmn_1>100 & obs_yr!=da_yr))
     } else {
       mdl1<- lm(log(lgs)~ log(lmn_1), data= subset(dat, lmn_1>100 & obs_yr!=da_yr))
     }
-    
     sim1<- sim(mdl1, n.sims=n_sim)
+    mdlout<- list()
+    mdlout$da_yr<- da_yr
+    mdlout$n_sim<- n_sim
+    mdlout$sim1<- sim1
+    return(mdlout)
+  })
+
+  output$passage_plot <- renderPlot({
+    ran<- input$raneff
+    if (ran==TRUE) {
+      coefs<- ct_mdl()$sim1@fixef
+    } else {
+      coefs<- ct_mdl()$sim1@coef
+    }
+    da_yr<- ct_mdl()$da_yr
+    n_sim<- ct_mdl()$n_sim
+    ran<- input$raneff
 
     # plotting fish counts
     plyr<- subset(ad_dat, 
-      obs_yr==da_yr & as.numeric(format(obs_date, format='%j'))<=en)
+      obs_yr==da_yr & as.numeric(format(obs_date, format='%j'))<=outtie()$en)
     with(subset(ad_dat, obs_yr==da_yr), 
       plot(obs_date, cumsum(lgs), pch= 20, main= da_yr, ylim= c(0, sum(lgs)+10000),
         xlim= as.Date(c(paste0(da_yr,"-04-15"), paste0(da_yr,"-06-30"))),
@@ -172,38 +192,24 @@ server <- function(input, output) {
     axis(side= 1, at= mrk, labels= substr(mrk, 6,10))
     # plot predicted lgs counts as uncertainties
     for(i in 1:n_sim){
-      if (ran==TRUE) {
-        with(subset(plyr, lmn_1>0),
-          lines(obs_date, cumsum(exp(sim1@fixef[i, 1]+ sim1@fixef[i, 2]*log(lmn_1)) ),
-            col='grey50'))
-      } else{
-        with(subset(plyr, lmn_1>0),
-          lines(obs_date, cumsum(exp(sim1@coef[i, 1]+ sim1@coef[i, 2]*log(lmn_1)) ),
-            col='grey50'))
-      }
+      with(subset(plyr, lmn_1>0),
+        lines(obs_date, cumsum(exp(coefs[i, 1]+ coefs[i, 2]*log(lmn_1)) ),
+          col='grey50'))
     }
-
-     with(subset(plyr, lmn_1>0), # observed lmn counts
-       lines(obs_date, cumsum(lmn_1), pch=20, lwd=3, col='blue'))
-     with(subset(plyr, lmn_1>0), # observed lgs counts
-       lines(obs_date, cumsum(lgs), pch=20, lwd=3, col='red'))
-     with(subset(ad_dat, obs_yr==da_yr),
-       legend(min(obs_date)+12, sum(lgs)+7500,
-         c('LMN counts','LGS counts','Expected LGS counts'),
-         lty=1, lwd=c(3,3,10), cex=1.2,
-         col=c('blue','red','grey50'), bty='n'))
-   })
+    
+    with(subset(plyr, lmn_1>0), # observed lmn counts
+      lines(obs_date, cumsum(lmn_1), pch=20, lwd=3, col='blue'))
+    with(subset(plyr, lmn_1>0), # observed lgs counts
+      lines(obs_date, cumsum(lgs), pch=20, lwd=3, col='red'))
+    with(subset(ad_dat, obs_yr==da_yr),
+      legend(min(obs_date)+12, sum(lgs)+7500,
+        c('LMN counts','LGS counts','Expected LGS counts'),
+        lty=1, lwd=c(3,3,10), cex=1.2,
+        col=c('blue','red','grey50'), bty='n'))
+  })
   
   # Display a plot for PIT-tag counts -----  
   
-  outtie<- reactive({
-    n_sim<- pi_out()$nsim
-    da_yr<- pi_out()$da_yr
-    strt<- format(input$strt, format='%m-%d')
-    cutoff<- format(input$cutoff, format='%m-%d')
-    tt_func(pitflow2, da_yr, strt, cutoff, n_sim)
-  })
-
   output$pittag_counts <- renderPlot({
     da_yr<- pi_out()$da_yr
     dates<- as.Date(as.numeric(row.names(outtie()$pit_ct)),
