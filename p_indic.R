@@ -229,7 +229,7 @@ year<- 2018
 # inverse gaussian is much slower in comupting, but mathematically more legit
 fmmdl1<- glmer(ftt~ sjday+ sdis_ihr+ skm+ sihr_temp+ mig_his+ (1|yr),
   data=subset(pitflow2, !yr %in% c(2011, year)),
-  # family=Gamma(link='inverse') )
+  # family=gaussian(link='inverse') )
   family=inverse.gaussian(link='identity') )
 fmmdl2<- lmer(I(1/ftt)~ scale(jday)+ scale(ihr_temp)+ scale(dis_ihr)+ scale(km)
   + mig_his+ (1|yr), data=subset(pitflow2, !yr %in% c(2011, year)) )
@@ -324,6 +324,7 @@ tt_func<- function(dat, betties, year, strt, cutoff, realtime_adj='f', inv_gau='
   output$sumtab<- sumtab
   output$ms<- ms
   output$con_obs<- mean(!is.na(subdat$jday2))
+  output$con_all<- con_all
   output$con_pre<- con_pre
   output$pit_ct<- pit_ct
   return(output)
@@ -360,7 +361,7 @@ lines(cumsum(out$pit_ct[,2]), pch=20, lwd=2, col='red')
 # ----
 
 # summary look (for individual year)
-prep_it<- function(dat, year, allDates, inverse_gau='t', adj){
+prep_it<- function(dat, year, nsim, allDates, inverse_gau='t', adj){
   # specify model
   if(inverse_gau=='f'){
     mmdl<- lmer(I(1/ftt)~ jday+ dis_ihr+ km+ ihr_temp+ mig_his+ (1|yr),
@@ -374,18 +375,22 @@ prep_it<- function(dat, year, allDates, inverse_gau='t', adj){
   #
   prep_out<- list()
   prep_out$ftt_pre<- matrix(NA, nrow=3, ncol=length(allDates))
+  # prep_out$ftt_pre<- matrix(NA, nrow=nsim, ncol=length(allDates))
   prep_out$ftt_obs<- rep(NA, length(allDates))
   prep_out$conv_pre<- matrix(NA, nrow=3, ncol=length(allDates))
+  # prep_out$conv_pre<- matrix(NA, nrow=nsim, ncol=length(allDates))
   prep_out$conv_obs<- rep(NA, length(allDates))
   
   for(i in 1:length(allDates)){
     out<- tt_func(dat, betties, year, strt='04-01', cutoff=allDates[i],
       realtime_adj=adj, inv_gau=inverse_gau)
     # travel time
-    prep_out$ftt_pre[,i]<- out$sumtab[c(1,3,6),1]
+    # prep_out$ftt_pre[,i]<- out$sumtab[c(1,3,6),1]
+    prep_out$ftt_pre[,i]<- out$ms
     prep_out$ftt_obs[i]<- out$sumtab[3,2]
     # conversion
-    prep_out$conv_pre[,i]<- out$con_pre[c(1,4,6),1]
+    # prep_out$conv_pre[,i]<- out$con_pre[c(1,4,6),1]
+    prep_out$conv_pre[,i]<- out$con_all
     prep_out$conv_obs[i]<- out$con_obs
   }
   return(prep_out)
@@ -396,8 +401,8 @@ plot_it<- function(a, b, ftt_obs, ftt_pre, conv_obs, conv_pre){
     ylim=c(min(min(ftt_obs, na.rm=TRUE), min(ftt_pre, na.rm=TRUE))-0.5,
       max(max(ftt_obs, na.rm=TRUE), max(ftt_pre, na.rm=TRUE))+0.5),
     main=year, xlab=NA, ylab='Fish Travel Time (day)', ty='n')
-  # apply(ftt_pre, 1, function(x) lines(seq(a, b, 'day'), x, col='grey50'))
-  # lines(seq(a, b, 'day'), apply(ftt_pre, 2, median), lty=2)
+  # apply(ftt_pre, 1, function(x) lines(seq(a, b, 'day'), x, col='grey30'))
+  # lines(seq(a, b, 'day'), apply(ftt_pre, 2, median), lty=2, col='grey80')
   lines(seq(a, b, 'day'), ftt_pre[1,], lty=2, lwd=2)
   lines(seq(a, b, 'day'), ftt_pre[2,], lty=1, lwd=2)
   lines(seq(a, b, 'day'), ftt_pre[3,], lty=2, lwd=2)
@@ -406,21 +411,24 @@ plot_it<- function(a, b, ftt_obs, ftt_pre, conv_obs, conv_pre){
   plot(a,0, xlim=c(a,b),
     ylim=c(min(min(conv_obs, na.rm=TRUE), min(conv_pre, na.rm=TRUE))-0.05, 1),
     main=year, xlab=NA, ylab='Conversion', ty='n')
+  # apply(conv_pre, 1, function(x) lines(seq(a, b, 'day'), x, col='grey30'))
+  # lines(seq(a, b, 'day'), apply(conv_pre, 2, mean), lty=2, col='grey80')
   lines(seq(a, b, 'day'), conv_pre[1,], lty=2, lwd=2)
   lines(seq(a, b, 'day'), conv_pre[2,], lty=1, lwd=2)
   lines(seq(a, b, 'day'), conv_pre[3,], lty=2, lwd=2)
   lines(seq(a, b, 'day'), conv_obs, lwd=3, col='coral')
 }
+#
 # summary look (for individual year) ----
 year<-2017; start<-'05-10'; end<-'06-30'
 a<- as.Date(paste0(year, '-', start))
 b<-as.Date(paste0(year, '-', end))
 allDates <- format(seq(a, b, 'day'), format='%m-%d')
-nsim<- 100
+nsim<- 300
 
 windows()
 par(mfrow=c(2,1))
-prep_out<- prep_it(pitflow2, year, allDates, inverse_gau='t', adj='t')
+prep_out<- prep_it(pitflow2, year, nsim, allDates, inverse_gau='t', adj='t')
 plot_it(a, b, prep_out$ftt_obs, prep_out$ftt_pre, prep_out$conv_obs, prep_out$conv_pre)
 
 # summary look (for multiple years) ----
@@ -434,7 +442,7 @@ for(year in years2c){
   b<-as.Date(paste0(year, '-', end))
   allDates <- format(seq(a, b, 'day'), format='%m-%d')
   
-  prep_out<- prep_it(pitflow2, year, allDates, inverse_gau='t', adj='t')
+  prep_out<- prep_it(pitflow2, year, nsim, allDates, inverse_gau='t', adj='t')
   plot_it(a, b, prep_out$ftt_obs, prep_out$ftt_pre,
     prep_out$conv_obs, prep_out$conv_pre)
 }

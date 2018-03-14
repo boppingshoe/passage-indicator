@@ -58,11 +58,63 @@ tt_func<- function(dat, betties, year, strt, cutoff){
   pit_ct<- cbind(ihr_ct, gra_ct, gra_pre)
   
   out<- list()
+  out$n<- nrow(subdat)
   out$sumtab<- sumtab
   out$ms<- ms
+  out$con_all<- con_all
   out$pit_ct<- pit_ct
   out$en<- en
   return(out)
+}
+# summary function
+prep_it<- function(dat, betties, year, nsim, allDates){
+  prep_out<- list()
+  prep_out$ftt_pre<- matrix(NA, nrow=3, ncol=length(allDates))
+  # prep_out$ftt_pre<- matrix(NA, nrow=nsim, ncol=length(allDates))
+  prep_out$ftt_obs<- rep(NA, length(allDates))
+  prep_out$conv_pre<- matrix(NA, nrow=3, ncol=length(allDates))
+  # prep_out$conv_pre<- matrix(NA, nrow=nsim, ncol=length(allDates))
+  prep_out$conv_obs<- rep(NA, length(allDates))
+  
+  for(i in 1:length(allDates)){
+    out<- tt_func(dat, betties, year, strt='04-01', cutoff=allDates[i])
+    # travel time
+    prep_out$ftt_pre[,i]<- as.numeric(out$sumtab[c(1,3,6),2])
+    # prep_out$ftt_pre[,i]<- out$ms
+    prep_out$ftt_obs[i]<- as.numeric(out$sumtab[3,3])
+    # conversion
+    prep_out$conv_pre[,i]<- as.numeric(out$sumtab[c(1,4,6),4])
+    # prep_out$conv_pre[,i]<- out$con_all
+    prep_out$conv_obs[i]<- as.numeric(out$sumtab[7,4])
+  }
+  return(prep_out)
+}
+# conv summary plots function
+plot_conv<- function(a, b, year, conv_obs, conv_pre){
+  # conv
+  plot(a,0, xlim=c(a,b),
+    ylim=c(min(min(conv_obs, na.rm=TRUE), min(conv_pre, na.rm=TRUE))-0.05, 1),
+    main=year, xlab=NA, ylab='Conversion', ty='n')
+  # apply(conv_pre, 1, function(x) lines(seq(a, b, 'day'), x, col='grey30'))
+  # lines(seq(a, b, 'day'), apply(conv_pre, 2, mean), lty=2, col='grey80')
+  lines(seq(a, b, 'day'), conv_pre[1,], lty=2, lwd=1)
+  lines(seq(a, b, 'day'), conv_pre[2,], lty=1, lwd=2)
+  lines(seq(a, b, 'day'), conv_pre[3,], lty=2, lwd=1)
+  lines(seq(a, b, 'day'), conv_obs, lwd=3, col='coral')
+}
+# ftt summary plot function
+plot_ftt<- function(a, b, year, ftt_obs, ftt_pre){
+  # ftt
+  plot(a,0, xlim=c(a,b),
+    ylim=c(min(min(ftt_obs, na.rm=TRUE), min(ftt_pre, na.rm=TRUE))-0.5,
+      max(max(ftt_obs, na.rm=TRUE), max(ftt_pre, na.rm=TRUE))+0.5),
+    main=year, xlab=NA, ylab='Fish Travel Time (day)', ty='n')
+  # apply(ftt_pre, 1, function(x) lines(seq(a, b, 'day'), x, col='grey30'))
+  # lines(seq(a, b, 'day'), apply(ftt_pre, 2, median), lty=2, col='grey80')
+  lines(seq(a, b, 'day'), ftt_pre[1,], lty=2, lwd=2)
+  lines(seq(a, b, 'day'), ftt_pre[2,], lty=1, lwd=2)
+  lines(seq(a, b, 'day'), ftt_pre[3,], lty=2, lwd=2)
+  lines(seq(a, b, 'day'), ftt_obs, lwd=3, col='red')
 }
 
 # Define UI for application that...
@@ -86,7 +138,7 @@ ui <- fluidPage(
       sliderInput("strt", label="Start Date:", 
         min = as.Date("2017-04-01","%Y-%m-%d"),
         max = as.Date("2017-06-30","%Y-%m-%d"),
-        value = as.Date("2017-04-01"), timeFormat="%m/%d", step = 1),
+        value = as.Date("2017-05-10"), timeFormat="%m/%d", step = 1),
       sliderInput("cutoff", label="Cutoff Date:", 
         min = as.Date("2017-04-01","%Y-%m-%d"),
         max = as.Date("2017-06-30","%Y-%m-%d"),
@@ -134,7 +186,7 @@ server <- function(input, output) {
     return(betties)
   })
   
-  outtie<- reactive({
+  outtie<- reactive({ # output from tt_func
     n_sim<- pi_out()$nsim
     da_yr<- pi_out()$da_yr
     betties<- tt_betties()
@@ -212,25 +264,18 @@ server <- function(input, output) {
   
   output$pittag_counts <- renderPlot({
     da_yr<- pi_out()$da_yr
-    dates<- as.Date(as.numeric(row.names(outtie()$pit_ct)),
-      origin=as.Date(paste0(da_yr,"-01-01")) )
-    plot(dates, cumsum(outtie()$pit_ct[,1]), pch=20, main=da_yr,
-      ylim=c(0, sum(outtie()$pit_ct[,1])+100), xaxt='n',
-      xlim= c(min(dates), max(dates)),
-      xlab=NA, ylab='Cumulative PIT-tag Counts', ty='n')
-    mrks<- seq(min(dates), max(dates), "week")
-    axis(side= 1, at= mrks, labels= substr(mrks, 6,10))
+    n_sim<- pi_out()$n_sim
+    betties<- tt_betties()
+    strt<- format(input$strt, format='%m-%d')
+    cutoff<- format(input$cutoff, format='%m-%d')
+    a<- as.Date(paste0(da_yr, '-', strt))
+    b<-as.Date(paste0(da_yr, '-', cutoff))
+    allDates <- format(seq(a, b, 'day'), format='%m-%d')
     
-    for(s in 1:pi_out()$nsim){
-      lines(dates, cumsum(outtie()$pit_ct[,s+2]), col='grey50', lwd=3, lty=2)
-    }
-    # lines(dates, cumsum(outtie()$pit_ct[,1]), pch=20, lwd=2, col='blue')
-    lines(dates, cumsum(outtie()$pit_ct[,2]), pch=20, lwd=2, col='coral')
-    legend(min(dates), sum(outtie()$pit_ct[,1])+100,
-      c('Expected GRA PIT-tag counts','GRA PIT-tag counts'),
-      lty=c(2,1), lwd=c(3,2), cex=1.2,
-      col=c('grey50','coral'), bty='n')
-    
+    prep_out<- prep_it(pitflow2, betties, da_yr, n_sim, allDates)
+    plot_conv(a, b, da_yr, prep_out$conv_obs, prep_out$conv_pre)
+    legend(as.Date(paste0(da_yr,'-06-10')), 0.3, c('Observed','Predicted'),
+      lty=1, lwd=c(3,2), col=c('coral',1), bty='n')
   })
   
   # Display travel time summary table and a histogram for distribution of median -----
