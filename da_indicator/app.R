@@ -60,6 +60,7 @@ tt_func<- function(dat, betties, year, strt, cutoff){
   out<- list()
   out$n<- nrow(subdat)
   out$sumtab<- sumtab
+  out$ftt<- subdat$ftt
   out$ms<- ms
   out$con_all<- con_all
   out$pit_ct<- pit_ct
@@ -93,7 +94,7 @@ prep_it<- function(dat, betties, year, nsim, allDates){
 plot_conv<- function(a, b, year, conv_obs, conv_pre){
   # conv
   plot(a,0, xlim=c(a,b),
-    ylim=c(min(min(conv_obs, na.rm=TRUE), min(conv_pre, na.rm=TRUE))-0.05, 1),
+    ylim=c(min(min(conv_obs, na.rm=TRUE), min(conv_pre, na.rm=TRUE))-0.05, 1.1),
     main=year, xlab=NA, ylab='Conversion', ty='n')
   # apply(conv_pre, 1, function(x) lines(seq(a, b, 'day'), x, col='grey30'))
   # lines(seq(a, b, 'day'), apply(conv_pre, 2, mean), lty=2, col='grey80')
@@ -101,6 +102,8 @@ plot_conv<- function(a, b, year, conv_obs, conv_pre){
   lines(seq(a, b, 'day'), conv_pre[2,], lty=1, lwd=2)
   lines(seq(a, b, 'day'), conv_pre[3,], lty=2, lwd=1)
   lines(seq(a, b, 'day'), conv_obs, lwd=3, col='coral')
+  legend(a, 1.1, c('Observed','Predicted'),
+    lty=1, lwd=c(3,2), col=c('coral',1), bty='n')
 }
 # ftt summary plot function
 plot_ftt<- function(a, b, year, ftt_obs, ftt_pre){
@@ -274,8 +277,6 @@ server <- function(input, output) {
     
     prep_out<- prep_it(pitflow2, betties, da_yr, n_sim, allDates)
     plot_conv(a, b, da_yr, prep_out$conv_obs, prep_out$conv_pre)
-    legend(as.Date(paste0(da_yr,'-06-10')), 0.3, c('Observed','Predicted'),
-      lty=1, lwd=c(3,2), col=c('coral',1), bty='n')
   })
   
   # Display travel time summary table and a histogram for distribution of median -----
@@ -286,14 +287,14 @@ server <- function(input, output) {
   
   output$ftt_hist <- renderPlot({
     if(pi_out()$da_yr>2004) {
-      ms<- outtie()$ms
-      obs_med<- as.numeric(outtie()$sumtab[3,3])
-      hist(ms, breaks=50,
-        xlim= c(min(min(outtie()$ms),obs_med)-1, max(max(outtie()$ms),obs_med)+1),
-        main= paste('Distribution of Median Travel Time,', pi_out()$da_yr),
+      ftt<- outtie()$ftt
+      obs_rang<- as.numeric(outtie()$sumtab[c(2,3,5), 3])
+      hist(ftt, breaks=50,
+        # xlim= c(min(min(outtie()$ms),obs_med)-1, max(max(outtie()$ms),obs_med)+1),
+        main= paste('Distribution of Observed Travel Time,', pi_out()$da_yr),
         xlab= NULL)
-      abline(v=obs_med, col='red', lwd=2)
-      text(obs_med, 3, labels = 'Observed Median')
+      abline(v=obs_rang, col='red', lwd=c(1,2,1), lty=c(2,1,2))
+      # text(obs_med, 3, labels = 'Observed Median')
     }
   })
 

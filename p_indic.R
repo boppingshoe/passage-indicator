@@ -3,6 +3,7 @@
 
 rm(list=ls())
 wd<- "G:/STAFF/Bobby/adult passage"
+
 #
 # simulate expected lgs counts using observed lmn counts ----
 load(file= paste0(wd, '/data compile/ad_dat.Rdata'))
@@ -227,11 +228,11 @@ require(arm)
 year<- 2018
 # looking at model manually ----
 # inverse gaussian is much slower in comupting, but mathematically more legit
-fmmdl1<- glmer(ftt~ sjday+ sdis_ihr+ skm+ sihr_temp+ mig_his+ (1|yr),
+mmdl1<- glmer(ftt~ sjday+ sdis_ihr+ skm+ sihr_temp+ mig_his+ (1|yr),
   data=subset(pitflow2, !yr %in% c(2011, year)),
-  # family=gaussian(link='inverse') )
+  # family= Gamma(link='identity') )
   family=inverse.gaussian(link='identity') )
-fmmdl2<- lmer(I(1/ftt)~ scale(jday)+ scale(ihr_temp)+ scale(dis_ihr)+ scale(km)
+mmdl2<- lmer(I(1/ftt)~ scale(jday)+ scale(ihr_temp)+ scale(dis_ihr)+ scale(km)
   + mig_his+ (1|yr), data=subset(pitflow2, !yr %in% c(2011, year)) )
 #
 vif.lme <- function (fit) {
@@ -248,14 +249,25 @@ vif.lme <- function (fit) {
   names(v) <- nam
   v }
 
-vif.lme(fmmdl1)
+vif.lme(mmdl1)
 
-m_res<- residuals(fmmdl1)
-m_fit<- fitted(fmmdl1)
+# m_res<- residuals(mmdl1)
+y<- mmdl1@resp$y
+V<- mmdl1@pp$`.->V`
+H <- V %*% solve(t(V) %*% V) %*% t(V)
+hat_val <- diag(H)
+m_fit<- fitted(mmdl1)
+
+m_res<- (y+ 2*(m_fit^-0.5))/ sqrt(1-hat_val) # constant info scale
+s<- sd(y- m_fit)
+m_res<- (y- m_fit)/ (s*sqrt(1-hat_val))
+# m_dr<- mmdl1@resp$devResid()
 plot(m_fit, m_res) # not sure resid plot is helpful
+plot(mmdl1)
 
-plot(fmmdl2)
-summary(fmmdl2)
+
+plot(mmdl2)
+summary(mmdl2)
 # ----
 
 getCI <- function(ms) {
@@ -268,7 +280,7 @@ getCI <- function(ms) {
   result[6] <- max(ms, na.rm = TRUE)
   return(result)
 }
-tt_func<- function(dat, betties, year, strt, cutoff, realtime_adj='f', inv_gau='f'){
+tt_func<- function(dat, betties, year, strt, cutoff, realtime_adj='f'){
   # specify start and cutoff dates
   st<- as.numeric(format(as.Date(paste0(year, '-', strt)), format='%j'))
   en<- as.numeric(format(as.Date(paste0(year, '-', cutoff)), format='%j'))
@@ -281,19 +293,12 @@ tt_func<- function(dat, betties, year, strt, cutoff, realtime_adj='f', inv_gau='
   subdat$surv<- rbinom(nrow(subdat), 1, 0.96)
   subdat2<- subset(subdat, surv==1)
   
-  if(inv_gau=='f'){
-    vmtx<- cbind(1, subset(subdat2,
-      select=c('jday','dis_ihr','km','ihr_temp','mig_his') ))
-    vmtx$mig_his<- ifelse(vmtx$mig_his=='trans', 1, 0) 
-    fttsim<- 1/(betties %*% t(vmtx))
-  } else{
-     # for inverse gaussian
-    vmtx<- cbind(1, subset(subdat2,
-      select=c('sjday','sdis_ihr','skm','sihr_temp','mig_his') ))
-    vmtx$mig_his<- ifelse(vmtx$mig_his=='trans', 1, 0) 
-    fttsim<- betties %*% t(vmtx)
-  }
-  
+  # for inverse gaussian
+  vmtx<- cbind(1, subset(subdat2,
+    select=c('sjday','sdis_ihr','skm','sihr_temp','mig_his') ))
+  vmtx$mig_his<- ifelse(vmtx$mig_his=='trans', 1, 0) 
+  fttsim<- betties %*% t(vmtx)
+
   # conversion rate
   jday2sim<- t(t(fttsim)+ subdat2$jday)
   con_all<- apply(jday2sim, 1, function(x) sum(ceiling(x)<=en)/nrow(subdat) )
@@ -336,9 +341,12 @@ nsim<- 200
 # specify model
 mmdl<- lmer(I(1/ftt)~ jday+ dis_ihr+ km+ ihr_temp+ mig_his+ (1|yr),
   data=subset(pitflow2, !yr %in% c(2011, year)) )
-# mmdl<- glmer(ftt~ sjday+ sdis_ihr+ skm+ sihr_temp+ mig_his+ (1|yr),
-#   data=subset(pitflow2, !yr %in% c(2011, year)),
-#   family=inverse.gaussian(link='identity') )
+mmdl<- glmer(ftt~ sjday+ sdis_ihr+ skm+ sihr_temp+ mig_his+ (1|yr),
+  data=subset(pitflow2, !yr %in% c(2011, year)),
+  family= Gamma('identity') )
+mmdl<- glmer(ftt~ sjday+ sdis_ihr+ skm+ sihr_temp+ mig_his+ (1|yr),
+  data=subset(pitflow2, !yr %in% c(2011, year)),
+  family=inverse.gaussian(link='identity') )
 betties<- sim(mmdl, n.sims=nsim)@fixef # simulation
 
 out<- tt_func(pitflow2, betties, year, strt='04-01', cutoff='06-30')
@@ -364,8 +372,9 @@ lines(cumsum(out$pit_ct[,2]), pch=20, lwd=2, col='red')
 prep_it<- function(dat, year, nsim, allDates, inverse_gau='t', adj){
   # specify model
   if(inverse_gau=='f'){
-    mmdl<- lmer(I(1/ftt)~ jday+ dis_ihr+ km+ ihr_temp+ mig_his+ (1|yr),
-      data=subset(pitflow2, !yr %in% c(2011, year)) )
+    mmdl<- glmer(ftt~ sjday+ sdis_ihr+ skm+ sihr_temp+ mig_his+ (1|yr),
+      data=subset(dat, !yr %in% c(2011, year)),
+      family=Gamma(link='identity') )
   } else{
     mmdl<- glmer(ftt~ sjday+ sdis_ihr+ skm+ sihr_temp+ mig_his+ (1|yr),
       data=subset(dat, !yr %in% c(2011, year)),
@@ -383,14 +392,14 @@ prep_it<- function(dat, year, nsim, allDates, inverse_gau='t', adj){
   
   for(i in 1:length(allDates)){
     out<- tt_func(dat, betties, year, strt='04-01', cutoff=allDates[i],
-      realtime_adj=adj, inv_gau=inverse_gau)
+      realtime_adj=adj)
     # travel time
-    # prep_out$ftt_pre[,i]<- out$sumtab[c(1,3,6),1]
-    prep_out$ftt_pre[,i]<- out$ms
+    prep_out$ftt_pre[,i]<- out$sumtab[c(1,3,6),1]
+    # prep_out$ftt_pre[,i]<- out$ms
     prep_out$ftt_obs[i]<- out$sumtab[3,2]
     # conversion
-    # prep_out$conv_pre[,i]<- out$con_pre[c(1,4,6),1]
-    prep_out$conv_pre[,i]<- out$con_all
+    prep_out$conv_pre[,i]<- out$con_pre[c(1,4,6),1]
+    # prep_out$conv_pre[,i]<- out$con_all
     prep_out$conv_obs[i]<- out$con_obs
   }
   return(prep_out)
@@ -428,9 +437,9 @@ nsim<- 300
 
 windows()
 par(mfrow=c(2,1))
-prep_out<- prep_it(pitflow2, year, nsim, allDates, inverse_gau='t', adj='t')
+prep_out<- prep_it(pitflow2, year, nsim, allDates, inverse_gau='f', adj='f')
 plot_it(a, b, prep_out$ftt_obs, prep_out$ftt_pre, prep_out$conv_obs, prep_out$conv_pre)
-
+#
 # summary look (for multiple years) ----
 par(mfrow=c(3,4))
 years2c<- 2005:2010
