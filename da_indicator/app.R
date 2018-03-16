@@ -36,88 +36,54 @@ tt_func<- function(dat, betties, year, strt, cutoff){
     select=c('sjday','sdis_ihr','skm','sihr_temp','mig_his') ))
   vmtx$mig_his<- ifelse(vmtx$mig_his=='trans', 1, 0)
   fttsim<- betties %*% t(vmtx)
-  ms<- apply(fttsim, 1, median)
 
   # travel time
-  Predicted<- getCI(ms)
-  Observed<- getCI(subdat$ftt)
+  fttobs<- getCI(subdat$ftt)
   # conversion rate
   jday2sim<- t(t(fttsim)+ subdat2$jday)
-  con_all<- apply(jday2sim, 1, function(x) sum(ceiling(x)<=en)/nrow(subdat) )
-  ExpectedConv<- getCI(con_all)
+  conall<- apply(jday2sim, 1, function(x) sum(ceiling(x)<=en)/nrow(subdat) )
+  obsconv<- mean(!is.na(subdat$jday2))
+  # summary table for ftt, n and obs conv
   sumtab<- cbind(c("Min.", "2.5%", "Median","Mean", "97.5%", "Max."),
-    round(Predicted, 3), round(Observed, 3), round(ExpectedConv, 3))
+    round(fttobs, 3))
   sumtab<- rbind(sumtab,
-    cbind('n =', nrow(subdat), 'Obs Conv =', round(mean(!is.na(subdat$jday2)),3)) )
-  colnames(sumtab)<- c(' ', 'Predicted FTT', 'Observed FTT', 'Predicted Conv')
-  # pit-tag counts
-  ihr_ct<- table(subdat$jday)
-  gra_ct<- with(subdat, tapply(jday2, jday, function(x) sum(!is.na(x))))
-  gra_pre<- apply(jday2sim, 1, 
-    function(x) tapply(x, subdat2$jday, function(x) sum(ceiling(x)<=en)) )
-  pit_ct<- cbind(ihr_ct, gra_ct, gra_pre)
-  
+    cbind('n =', nrow(subdat)), cbind('Obs Conv =', round(obsconv,3)) )
+  colnames(sumtab)<- c(' ','Observed FTT')
+
   out<- list()
   out$n<- nrow(subdat)
   out$sumtab<- sumtab
   out$ftt<- subdat$ftt
-  out$ms<- ms
-  out$con_all<- con_all
-  out$pit_ct<- pit_ct
+  out$conall<- conall
+  out$obsconv<- obsconv
   out$en<- en
   return(out)
 }
 # summary function
 prep_it<- function(dat, betties, year, nsim, allDates){
   prep_out<- list()
-  prep_out$ftt_pre<- matrix(NA, nrow=3, ncol=length(allDates))
-  # prep_out$ftt_pre<- matrix(NA, nrow=nsim, ncol=length(allDates))
-  prep_out$ftt_obs<- rep(NA, length(allDates))
   prep_out$conv_pre<- matrix(NA, nrow=3, ncol=length(allDates))
-  # prep_out$conv_pre<- matrix(NA, nrow=nsim, ncol=length(allDates))
   prep_out$conv_obs<- rep(NA, length(allDates))
   
   for(i in 1:length(allDates)){
     out<- tt_func(dat, betties, year, strt='04-01', cutoff=allDates[i])
-    # travel time
-    prep_out$ftt_pre[,i]<- as.numeric(out$sumtab[c(1,3,6),2])
-    # prep_out$ftt_pre[,i]<- out$ms
-    prep_out$ftt_obs[i]<- as.numeric(out$sumtab[3,3])
     # conversion
-    prep_out$conv_pre[,i]<- as.numeric(out$sumtab[c(1,4,6),4])
-    # prep_out$conv_pre[,i]<- out$con_all
-    prep_out$conv_obs[i]<- as.numeric(out$sumtab[7,4])
+    prep_out$conv_pre[,i]<- c(min(out$conall), mean(out$conall), max(out$conall))
+    prep_out$conv_obs[i]<- out$obsconv
   }
   return(prep_out)
 }
 # conv summary plots function
 plot_conv<- function(a, b, year, conv_obs, conv_pre){
-  # conv
   plot(a,0, xlim=c(a,b),
     ylim=c(min(min(conv_obs, na.rm=TRUE), min(conv_pre, na.rm=TRUE))-0.05, 1.1),
     main=year, xlab=NA, ylab='Conversion', ty='n')
-  # apply(conv_pre, 1, function(x) lines(seq(a, b, 'day'), x, col='grey30'))
-  # lines(seq(a, b, 'day'), apply(conv_pre, 2, mean), lty=2, col='grey80')
   lines(seq(a, b, 'day'), conv_pre[1,], lty=2, lwd=1)
   lines(seq(a, b, 'day'), conv_pre[2,], lty=1, lwd=2)
   lines(seq(a, b, 'day'), conv_pre[3,], lty=2, lwd=1)
   lines(seq(a, b, 'day'), conv_obs, lwd=3, col='coral')
   legend(a, 1.1, c('Observed','Predicted'),
     lty=1, lwd=c(3,2), col=c('coral',1), bty='n')
-}
-# ftt summary plot function
-plot_ftt<- function(a, b, year, ftt_obs, ftt_pre){
-  # ftt
-  plot(a,0, xlim=c(a,b),
-    ylim=c(min(min(ftt_obs, na.rm=TRUE), min(ftt_pre, na.rm=TRUE))-0.5,
-      max(max(ftt_obs, na.rm=TRUE), max(ftt_pre, na.rm=TRUE))+0.5),
-    main=year, xlab=NA, ylab='Fish Travel Time (day)', ty='n')
-  # apply(ftt_pre, 1, function(x) lines(seq(a, b, 'day'), x, col='grey30'))
-  # lines(seq(a, b, 'day'), apply(ftt_pre, 2, median), lty=2, col='grey80')
-  lines(seq(a, b, 'day'), ftt_pre[1,], lty=2, lwd=2)
-  lines(seq(a, b, 'day'), ftt_pre[2,], lty=1, lwd=2)
-  lines(seq(a, b, 'day'), ftt_pre[3,], lty=2, lwd=2)
-  lines(seq(a, b, 'day'), ftt_obs, lwd=3, col='red')
 }
 
 # Define UI for application that...
@@ -136,8 +102,6 @@ ui <- fluidPage(
       numericInput("nsim", "Number of simulations:", 
         value = 100, min = 100, max = 500, step = 100),
       actionButton(inputId = "reload", label = "Simulate!"),
-      checkboxInput("dat91", "Use data since 1991", value = FALSE),
-      checkboxInput("raneff", "Random year effects", value = TRUE),
       sliderInput("strt", label="Start Date:", 
         min = as.Date("2017-04-01","%Y-%m-%d"),
         max = as.Date("2017-06-30","%Y-%m-%d"),
@@ -190,7 +154,6 @@ server <- function(input, output) {
   })
   
   outtie<- reactive({ # output from tt_func
-    n_sim<- pi_out()$nsim
     da_yr<- pi_out()$da_yr
     betties<- tt_betties()
     strt<- format(input$strt, format='%m-%d')
@@ -204,19 +167,9 @@ server <- function(input, output) {
     da_yr<- pi_out()$da_yr
     n_sim<- pi_out()$nsim
     
-    ran<- input$raneff
-    d91<- input$dat91
-    # fitting a linear regression model and simulate predicted coefs
-    if (d91==TRUE) {
-      dat<- subset(ad_dat, lgs>0)
-    } else {dat<- subset(ad_dat, obs_yr>=2009 & lgs>0)}
-    
-    if (ran==TRUE) {
-      mdl1<- lmer(log(lgs)~ log(lmn_1)+ (log(lmn_1)|obs_yr), 
-        data= subset(dat, lmn_1>100 & obs_yr!=da_yr))
-    } else {
-      mdl1<- lm(log(lgs)~ log(lmn_1), data= subset(dat, lmn_1>100 & obs_yr!=da_yr))
-    }
+    dat<- subset(ad_dat, obs_yr>=2009 & lgs>0)
+    mdl1<- lmer(log(lgs)~ log(lmn_1)+ (log(lmn_1)|obs_yr), 
+      data= subset(dat, lmn_1>100 & obs_yr!=da_yr))
     sim1<- sim(mdl1, n.sims=n_sim)
     mdlout<- list()
     mdlout$da_yr<- da_yr
@@ -226,16 +179,10 @@ server <- function(input, output) {
   })
 
   output$passage_plot <- renderPlot({
-    ran<- input$raneff
-    if (ran==TRUE) {
-      coefs<- ct_mdl()$sim1@fixef
-    } else {
-      coefs<- ct_mdl()$sim1@coef
-    }
     da_yr<- ct_mdl()$da_yr
     n_sim<- ct_mdl()$n_sim
-    ran<- input$raneff
 
+    coefs<- ct_mdl()$sim1@fixef
     # plotting fish counts
     plyr<- subset(ad_dat, 
       obs_yr==da_yr & as.numeric(format(obs_date, format='%j'))<=outtie()$en)
@@ -267,7 +214,7 @@ server <- function(input, output) {
   
   output$pittag_counts <- renderPlot({
     da_yr<- pi_out()$da_yr
-    n_sim<- pi_out()$n_sim
+    n_sim<- pi_out()$nsim
     betties<- tt_betties()
     strt<- format(input$strt, format='%m-%d')
     cutoff<- format(input$cutoff, format='%m-%d')
@@ -279,7 +226,7 @@ server <- function(input, output) {
     plot_conv(a, b, da_yr, prep_out$conv_obs, prep_out$conv_pre)
   })
   
-  # Display travel time summary table and a histogram for distribution of median -----
+  # Display travel time summary table and a histogram -----
 
   output$travel_time <- renderTable({
     if(pi_out()$da_yr>2004) {outtie()$sumtab}
@@ -288,9 +235,8 @@ server <- function(input, output) {
   output$ftt_hist <- renderPlot({
     if(pi_out()$da_yr>2004) {
       ftt<- outtie()$ftt
-      obs_rang<- as.numeric(outtie()$sumtab[c(2,3,5), 3])
+      obs_rang<- as.numeric(outtie()$sumtab[c(2,3,5), 2])
       hist(ftt, breaks=50,
-        # xlim= c(min(min(outtie()$ms),obs_med)-1, max(max(outtie()$ms),obs_med)+1),
         main= paste('Distribution of Observed Travel Time,', pi_out()$da_yr),
         xlab= NULL)
       abline(v=obs_rang, col='red', lwd=c(1,2,1), lty=c(2,1,2))
