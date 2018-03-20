@@ -54,6 +54,7 @@ tt_func<- function(dat, betties, year, strt, cutoff){
   out$n<- nrow(subdat)
   out$sumtab<- sumtab
   out$ftt<- subdat$ftt
+  out$fttsim<- fttsim[jday2sim<=en]
   out$conall<- conall
   out$obsconv<- obsconv
   out$en<- en
@@ -84,6 +85,17 @@ plot_conv<- function(a, b, year, conv_obs, conv_pre){
   lines(seq(a, b, 'day'), conv_obs, lwd=3, col='coral')
   legend(a, 1.1, c('Observed','Predicted'),
     lty=1, lwd=c(3,2), col=c('coral',1), bty='n')
+}
+# histgram in percent
+histop<- function(ftt, fttsim, da_yr){
+  hist(fttsim, breaks=50, freq=FALSE, col=rgb(0,0,0,1), xlab='Day',
+    main= paste('Distribution of Travel Time,', da_yr),
+    xlim=c(min(min(ftt), min(fttsim)), max(max(ftt), max(fttsim))+0.1),
+    ylim=c(0, max(max(hist(ftt, plot=FALSE)$density),
+      max(hist(fttsim, plot=FALSE)$density))), ylab='Percent')
+    # yaxt='n', 
+  # tmp2 <- pretty( tmp$counts/sum(tmp$counts)*100 )
+  # axis(2, at=tmp2*sum(tmp$counts)/100, labels=tmp2)
 }
 
 # Define UI for application that...
@@ -120,8 +132,8 @@ ui <- fluidPage(
         ),
         
         fluidRow(
-          column(6, tableOutput("travel_time")),
-          column(6, plotOutput("ftt_hist"))
+          column(4, tableOutput("travel_time")),
+          column(8, plotOutput("ftt_hist"))
         )
       )
    )
@@ -149,6 +161,7 @@ server <- function(input, output) {
     mmdl<- glmer(ftt~ sjday+ sdis_ihr+ skm+ sihr_temp+ mig_his+ (1|yr),
       data=subset(pitflow2, !yr %in% c(2011, da_yr)),
       family=inverse.gaussian(link='identity') )
+      # family=inverse.gaussian(link='inverse') )
     betties<- sim(mmdl, n.sims=n_sim)@fixef # simulation
     return(betties)
   })
@@ -234,12 +247,34 @@ server <- function(input, output) {
   
   output$ftt_hist <- renderPlot({
     if(pi_out()$da_yr>2004) {
-      ftt<- outtie()$ftt
-      obs_rang<- as.numeric(outtie()$sumtab[c(2,3,5), 2])
-      hist(ftt, breaks=50,
-        main= paste('Distribution of Observed Travel Time,', pi_out()$da_yr),
-        xlab= NULL)
-      abline(v=obs_rang, col='red', lwd=c(1,2,1), lty=c(2,1,2))
+      ftt<- outtie()$ftt[!is.na(outtie()$ftt)]
+      fttsim<- outtie()$fttsim
+      da_yr<- pi_out()$da_yr
+      # obs_rang<- as.numeric(outtie()$sumtab[c(2,3,5), 2])
+      # hist(fttsim, breaks=50, freq=FALSE, col=rgb(0,0,0,1), xlab= NULL,
+      #   main= paste('Distribution of Travel Time,', pi_out()$da_yr),
+      #   xlim=c(min(min(ftt), min(fttsim)), max(max(ftt), max(fttsim))))
+        # ylim=c(0,1))
+      # histop(ftt, fttsim, da_yr)
+      fsimhis<- hist(fttsim, breaks=50, plot=FALSE)
+      ftthis<- hist(ftt, breaks=50, plot=FALSE)
+      xmax<- max(max(ftt), max(fttsim))
+      ymax<- max(max(fsimhis$density),max(ftthis$density))
+      plot(fsimhis, freq=FALSE, col=rgb(0,0,0,.9), xlab='Day',
+        main= paste('Distribution of Travel Time,', da_yr),
+        xlim=c(min(min(ftt), min(fttsim)), xmax),
+        ylim=c(0, ymax+0.15))
+      # hist(fttsim, breaks=50, freq=FALSE, col=rgb(0,0,0,1), xlab='Day',
+      #   main= paste('Distribution of Travel Time,', da_yr),
+      #   xlim=c(min(min(ftt), min(fttsim)), max(max(ftt), max(fttsim))),
+      #   ylim=c(0, max(max(hist(ftt, plot=FALSE)$density),
+      #     max(hist(fttsim, plot=FALSE)$density))+0.15))
+      colors<- ifelse(ftthis$breaks<median(ftt), rgb(0,0.255,0,.6), rgb(1,1,1,.5))
+      # hist(ftt, breaks=50, freq=FALSE, col=rgb(1,1,1,.3), add=TRUE)
+      hist(ftt, breaks=50, freq=FALSE, col=colors, add=TRUE)
+      legend(xmax*0.8, ymax, c('Observed','< median','Predicted'),
+        pch=c(0,15,15), col=c(1,rgb(0,0.255,0,.6),1), bty='n')
+      # abline(v=obs_rang, col='red', lwd=c(1,2,1), lty=c(2,1,2))
       # text(obs_med, 3, labels = 'Observed Median')
     }
   })
