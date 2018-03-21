@@ -3,6 +3,7 @@
 
 library(shiny)
 library(arm)
+library(statmod)
 load(file= 'data/ad_dat.Rdata')
 load(file= 'data/pitflow2.Rdata')
 options(scipen=999) # keep plot from displaying scientific notation
@@ -37,24 +38,26 @@ tt_func<- function(dat, betties, year, strt, cutoff){
   vmtx$mig_his<- ifelse(vmtx$mig_his=='trans', 1, 0)
   fttsim<- betties %*% t(vmtx)
 
-  # travel time
-  fttobs<- getCI(subdat$ftt)
   # conversion rate
   jday2sim<- t(t(fttsim)+ subdat2$jday)
   conall<- apply(jday2sim, 1, function(x) sum(ceiling(x)<=en)/nrow(subdat) )
   obsconv<- mean(!is.na(subdat$jday2))
+  # travel time
+  fttobs<- getCI(subdat$ftt)
+  fttsim<- fttsim[jday2sim<=en]
   # summary table for ftt, n and obs conv
   sumtab<- cbind(c("Min.", "2.5%", "Median","Mean", "97.5%", "Max."),
-    round(fttobs, 3))
+    round(fttobs, 3), round(getCI(fttsim),3))
   sumtab<- rbind(sumtab,
-    cbind('n =', nrow(subdat)), cbind('Obs Conv =', round(obsconv,3)) )
-  colnames(sumtab)<- c(' ','Observed FTT')
+    cbind('n =', nrow(subdat), ' '),
+    cbind('Obs Conv =', round(obsconv,3), ' ') )
+  colnames(sumtab)<- c(' ','Observed', 'Predicted FTT')
 
   out<- list()
   out$n<- nrow(subdat)
   out$sumtab<- sumtab
   out$ftt<- subdat$ftt
-  out$fttsim<- fttsim[jday2sim<=en]
+  out$fttsim<- fttsim
   out$conall<- conall
   out$obsconv<- obsconv
   out$en<- en
@@ -69,7 +72,9 @@ prep_it<- function(dat, betties, year, nsim, allDates){
   for(i in 1:length(allDates)){
     out<- tt_func(dat, betties, year, strt='04-01', cutoff=allDates[i])
     # conversion
-    prep_out$conv_pre[,i]<- c(min(out$conall), mean(out$conall), max(out$conall))
+    # prep_out$conv_pre[,i]<- c(min(out$conall), mean(out$conall), max(out$conall))
+    prep_out$conv_pre[,i]<- c(quantile(out$conall,0.25),
+      median(out$conall), quantile(out$conall,0.75))
     prep_out$conv_obs[i]<- out$obsconv
   }
   return(prep_out)
@@ -77,25 +82,14 @@ prep_it<- function(dat, betties, year, nsim, allDates){
 # conv summary plots function
 plot_conv<- function(a, b, year, conv_obs, conv_pre){
   plot(a,0, xlim=c(a,b),
-    ylim=c(min(min(conv_obs, na.rm=TRUE), min(conv_pre, na.rm=TRUE))-0.05, 1.1),
+    ylim=c(min(min(conv_obs, na.rm=TRUE), min(conv_pre, na.rm=TRUE))-0.05, 1.2),
     main=year, xlab=NA, ylab='Conversion', ty='n')
   lines(seq(a, b, 'day'), conv_pre[1,], lty=2, lwd=1)
   lines(seq(a, b, 'day'), conv_pre[2,], lty=1, lwd=2)
   lines(seq(a, b, 'day'), conv_pre[3,], lty=2, lwd=1)
   lines(seq(a, b, 'day'), conv_obs, lwd=3, col='coral')
-  legend(a, 1.1, c('Observed','Predicted'),
-    lty=1, lwd=c(3,2), col=c('coral',1), bty='n')
-}
-# histgram in percent
-histop<- function(ftt, fttsim, da_yr){
-  hist(fttsim, breaks=50, freq=FALSE, col=rgb(0,0,0,1), xlab='Day',
-    main= paste('Distribution of Travel Time,', da_yr),
-    xlim=c(min(min(ftt), min(fttsim)), max(max(ftt), max(fttsim))+0.1),
-    ylim=c(0, max(max(hist(ftt, plot=FALSE)$density),
-      max(hist(fttsim, plot=FALSE)$density))), ylab='Percent')
-    # yaxt='n', 
-  # tmp2 <- pretty( tmp$counts/sum(tmp$counts)*100 )
-  # axis(2, at=tmp2*sum(tmp$counts)/100, labels=tmp2)
+  legend(a, 1.2, c('Observed','Predicted Median','50% Pred Interval'),
+    lty=c(1,1,2), lwd=c(3,2,1), col=c('coral',1,1), bty='n')
 }
 
 # Define UI for application that...
@@ -110,7 +104,7 @@ ui <- fluidPage(
     column(3,
       numericInput("year", 
         label = "Select a year to display:", 
-        value = 2017, min = 1991, max = 2018, step = 1),
+        value = 2017, min = 2005, max = 2018, step = 1),
       numericInput("nsim", "Number of simulations:", 
         value = 100, min = 100, max = 500, step = 100),
       actionButton(inputId = "reload", label = "Simulate!"),
@@ -121,7 +115,8 @@ ui <- fluidPage(
       sliderInput("cutoff", label="Cutoff Date:", 
         min = as.Date("2017-04-01","%Y-%m-%d"),
         max = as.Date("2017-06-30","%Y-%m-%d"),
-        value = as.Date("2017-06-30"), timeFormat="%m/%d", step = 1)
+        value = as.Date("2017-06-30"), timeFormat="%m/%d", step = 1),
+      checkboxInput("colors", "Green", FALSE)
     ),
   
       # Show a plot of expected passage
@@ -132,8 +127,8 @@ ui <- fluidPage(
         ),
         
         fluidRow(
-          column(4, tableOutput("travel_time")),
-          column(8, plotOutput("ftt_hist"))
+          column(5, tableOutput("travel_time")),
+          column(7, plotOutput("ftt_hist"))
         )
       )
    )
@@ -161,8 +156,13 @@ server <- function(input, output) {
     mmdl<- glmer(ftt~ sjday+ sdis_ihr+ skm+ sihr_temp+ mig_his+ (1|yr),
       data=subset(pitflow2, !yr %in% c(2011, da_yr)),
       family=inverse.gaussian(link='identity') )
-      # family=inverse.gaussian(link='inverse') )
-    betties<- sim(mmdl, n.sims=n_sim)@fixef # simulation
+    # betties<- sim(mmdl, n.sims=n_sim)@fixef # simulation using arm package
+    # or simulation based on inv gauss
+    coefs<- fixef(mmdl)
+    vcdf<- as.data.frame(VarCorr(mmdl))
+    varesp<- vcdf[vcdf$grp=='Residual', 'vcov']
+    betties<- as.matrix(cbind(rinvgauss(n_sim, mean=coefs[1], dispersion=varesp),
+      coefs[2], coefs[3], coefs[4], coefs[5], coefs[6]))
     return(betties)
   })
   
@@ -247,35 +247,29 @@ server <- function(input, output) {
   
   output$ftt_hist <- renderPlot({
     if(pi_out()$da_yr>2004) {
-      ftt<- outtie()$ftt[!is.na(outtie()$ftt)]
-      fttsim<- outtie()$fttsim
+      ftt<- outtie()$ftt[!is.na(outtie()$ftt)] # define travel time (obs)
+      fttsim<- outtie()$fttsim # ftt (simulated)
+      # define params for plotting
       da_yr<- pi_out()$da_yr
-      # obs_rang<- as.numeric(outtie()$sumtab[c(2,3,5), 2])
-      # hist(fttsim, breaks=50, freq=FALSE, col=rgb(0,0,0,1), xlab= NULL,
-      #   main= paste('Distribution of Travel Time,', pi_out()$da_yr),
-      #   xlim=c(min(min(ftt), min(fttsim)), max(max(ftt), max(fttsim))))
-        # ylim=c(0,1))
-      # histop(ftt, fttsim, da_yr)
       fsimhis<- hist(fttsim, breaks=50, plot=FALSE)
       ftthis<- hist(ftt, breaks=50, plot=FALSE)
       xmax<- max(max(ftt), max(fttsim))
       ymax<- max(max(fsimhis$density),max(ftthis$density))
+      
       plot(fsimhis, freq=FALSE, col=rgb(0,0,0,.9), xlab='Day',
         main= paste('Distribution of Travel Time,', da_yr),
         xlim=c(min(min(ftt), min(fttsim)), xmax),
-        ylim=c(0, ymax+0.15))
-      # hist(fttsim, breaks=50, freq=FALSE, col=rgb(0,0,0,1), xlab='Day',
-      #   main= paste('Distribution of Travel Time,', da_yr),
-      #   xlim=c(min(min(ftt), min(fttsim)), max(max(ftt), max(fttsim))),
-      #   ylim=c(0, max(max(hist(ftt, plot=FALSE)$density),
-      #     max(hist(fttsim, plot=FALSE)$density))+0.15))
-      colors<- ifelse(ftthis$breaks<median(ftt), rgb(0,0.255,0,.6), rgb(1,1,1,.5))
-      # hist(ftt, breaks=50, freq=FALSE, col=rgb(1,1,1,.3), add=TRUE)
-      hist(ftt, breaks=50, freq=FALSE, col=colors, add=TRUE)
-      legend(xmax*0.8, ymax, c('Observed','< median','Predicted'),
-        pch=c(0,15,15), col=c(1,rgb(0,0.255,0,.6),1), bty='n')
-      # abline(v=obs_rang, col='red', lwd=c(1,2,1), lty=c(2,1,2))
-      # text(obs_med, 3, labels = 'Observed Median')
+        ylim=c(0, ymax*1.1))
+      if(input$colors==FALSE){
+        hist(ftt, breaks=50, freq=FALSE, col=rgb(1,1,1,.5), add=TRUE)
+        legend(xmax*0.8, ymax, c('Observed','Predicted'),
+          pch=c(0,15), col=c(1,1), bty='n')
+      } else{
+          colors<- ifelse(ftthis$breaks<median(ftt), rgb(0,0.255,0,.7), rgb(1,1,1,.5))
+          hist(ftt, breaks=50, freq=FALSE, col=colors, add=TRUE)
+          legend(xmax*0.8, ymax, c('Observed','< median','Predicted'),
+            pch=c(0,15,15), col=c(1,rgb(0,0.255,0,.6),1), bty='n')
+      }
     }
   })
 

@@ -248,7 +248,6 @@ vif.lme <- function (fit) {
   v <- diag(solve(v/(d %o% d)))
   names(v) <- nam
   v }
-
 vif.lme(mmdl1)
 
 # m_res<- residuals(mmdl1)
@@ -264,7 +263,7 @@ m_res<- (y- m_fit)/ (s*sqrt(1-hat_val))
 # m_dr<- mmdl1@resp$devResid()
 plot(m_fit, m_res) # not sure resid plot is helpful
 plot(mmdl1)
-
+summary(mmdl1)
 
 plot(mmdl2)
 summary(mmdl2)
@@ -380,7 +379,12 @@ prep_it<- function(dat, year, nsim, allDates, inverse_gau='t', adj){
       data=subset(dat, !yr %in% c(2011, year)),
       family=inverse.gaussian(link='identity') )
   }
-  betties<- sim(mmdl, n.sims=nsim)@fixef # simulation
+  # betties<- sim(mmdl, n.sims=nsim)@fixef # simulation
+  coefs<- fixef(mmdl)
+  vcdf<- as.data.frame(VarCorr(mmdl))
+  varesp<- vcdf[vcdf$grp=='Residual', 'vcov']
+  betties<- as.matrix(cbind(statmod::rinvgauss(nsim, mean=coefs[1], dispersion=varesp),
+    coefs[2], coefs[3], coefs[4], coefs[5], coefs[6]))
   #
   prep_out<- list()
   prep_out$ftt_pre<- matrix(NA, nrow=3, ncol=length(allDates))
@@ -462,5 +466,13 @@ smd<- glm(surv~ 1, data=pitflow2, family=binomial)
 summary(smd)
 smmd<- glmer(surv~ 1+ (1|yr) , data=pitflow2, family=binomial)
 summary(smmd)
+
+
+
+
+
+
+
+
 
 
