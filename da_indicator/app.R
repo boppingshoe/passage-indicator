@@ -4,11 +4,12 @@
 library(shiny)
 library(arm)
 library(statmod)
+library(HDInterval)
 load(file= 'data/ad_dat.Rdata')
 load(file= 'data/pitflow2.Rdata')
 options(scipen=999) # keep plot from displaying scientific notation
 
-# summary function
+# summary stats
 getCI <- function(ms) {
   result <- rep(NA, 6)
   result[1] <- min(ms, na.rm = TRUE)
@@ -63,10 +64,11 @@ tt_func<- function(dat, betties, year, strt, cutoff){
   out$en<- en
   return(out)
 }
-# summary function
+# summarize cumulative conversion from 4/1, loop for every day in specified period
 prep_it<- function(dat, betties, year, nsim, allDates){
   prep_out<- list()
   prep_out$conv_pre<- matrix(NA, nrow=3, ncol=length(allDates))
+  prep_out$conv_prehdi<- matrix(NA, nrow=2, ncol=length(allDates))
   prep_out$conv_obs<- rep(NA, length(allDates))
   
   for(i in 1:length(allDates)){
@@ -75,15 +77,22 @@ prep_it<- function(dat, betties, year, nsim, allDates){
     # prep_out$conv_pre[,i]<- c(min(out$conall), mean(out$conall), max(out$conall))
     prep_out$conv_pre[,i]<- c(quantile(out$conall,0.25),
       median(out$conall), quantile(out$conall,0.75))
+    prep_out$conv_prehdi[,i]<- hdi(out$conall,0.70)
     prep_out$conv_obs[i]<- out$obsconv
   }
   return(prep_out)
 }
 # conv summary plots function
-plot_conv<- function(a, b, year, conv_obs, conv_pre){
+plot_conv<- function(a, b, year, conv_obs, conv_pre, conv_prehdi, hdiconv){
   plot(a,0, xlim=c(a,b),
     ylim=c(min(min(conv_obs, na.rm=TRUE), min(conv_pre, na.rm=TRUE))-0.05, 1.2),
     main=year, xlab=NA, ylab='Conversion', ty='n')
+  
+  if(hdiconv==TRUE) {
+    lines(seq(a, b, 'day'), conv_prehdi[1,], col='red')
+    lines(seq(a, b, 'day'), conv_prehdi[2,], col='red')
+  }
+  
   lines(seq(a, b, 'day'), conv_pre[1,], lty=2, lwd=1)
   lines(seq(a, b, 'day'), conv_pre[2,], lty=1, lwd=2)
   lines(seq(a, b, 'day'), conv_pre[3,], lty=2, lwd=1)
@@ -106,7 +115,7 @@ ui <- fluidPage(
         label = "Select a year to display:", 
         value = 2017, min = 2005, max = 2018, step = 1),
       numericInput("nsim", "Number of simulations:", 
-        value = 100, min = 100, max = 500, step = 100),
+        value = 300, min = 100, max = 500, step = 100),
       actionButton(inputId = "reload", label = "Simulate!"),
       sliderInput("strt", label="Start Date:", 
         min = as.Date("2017-04-01","%Y-%m-%d"),
@@ -116,7 +125,9 @@ ui <- fluidPage(
         min = as.Date("2017-04-01","%Y-%m-%d"),
         max = as.Date("2017-06-30","%Y-%m-%d"),
         value = as.Date("2017-06-30"), timeFormat="%m/%d", step = 1),
-      checkboxInput("colors", "Green", FALSE)
+      # checkboxInput("allconv", "All Conv Prediction", FALSE),
+      checkboxInput("hdiconv", "70% HDI for Predicted Conversion", FALSE),
+      checkboxInput("colors", "< Median FTT", FALSE)
     ),
   
       # Show a plot of expected passage
@@ -223,7 +234,7 @@ server <- function(input, output) {
         col=c('blue','red','grey50'), bty='n'))
   })
   
-  # Display a plot for PIT-tag counts -----  
+  # Display a plot for PIT-tag conversion -----  
   
   output$pittag_counts <- renderPlot({
     da_yr<- pi_out()$da_yr
@@ -236,7 +247,7 @@ server <- function(input, output) {
     allDates <- format(seq(a, b, 'day'), format='%m-%d')
     
     prep_out<- prep_it(pitflow2, betties, da_yr, n_sim, allDates)
-    plot_conv(a, b, da_yr, prep_out$conv_obs, prep_out$conv_pre)
+    plot_conv(a, b, da_yr, prep_out$conv_obs, prep_out$conv_pre, prep_out$conv_prehdi, input$hdiconv)
   })
   
   # Display travel time summary table and a histogram -----
