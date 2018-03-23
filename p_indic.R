@@ -217,10 +217,10 @@ load(file= paste0(wd, '/data compile/pitflow2.Rdata'))
 
 windows()
 par(mfrow=c(3,5))
-# plotting 1/ftt
+# plotting dist/ftt
 for(i in unique(pitflow2$yr)){
-  hist(1/(subset(pitflow2, yr==i)$ftt), breaks=500, main=i)
-  print(summary(subset(pit_flow, yr==i)$ftt))
+  hist(157/(subset(pitflow2, yr==i)$ftt), breaks=500, xlab='Velocity (km/day)', main=i)
+  print(summary(subset(pitflow2, yr==i)$ftt))
 }
 
 # mixed models
@@ -232,7 +232,7 @@ mmdl1<- glmer(ftt~ sjday+ sdis_ihr+ skm+ sihr_temp+ mig_his+ (1|yr),
   data=subset(pitflow2, !yr %in% c(2011, year)),
   # family= Gamma(link='identity') )
   family=inverse.gaussian(link='identity') )
-mmdl2<- lmer(I(1/ftt)~ scale(jday)+ scale(ihr_temp)+ scale(dis_ihr)+ scale(km)
+mmdl1<- lmer(I(157/ftt)~ sjday+ sihr_temp+ sdis_ihr+ skm
   + mig_his+ (1|yr), data=subset(pitflow2, !yr %in% c(2011, year)) )
 #
 vif.lme <- function (fit) {
@@ -467,7 +467,43 @@ summary(smd)
 smmd<- glmer(surv~ 1+ (1|yr) , data=pitflow2, family=binomial)
 summary(smmd)
 
+# plotting historical ftt dist ----
+# from Jerry
+histhist<- function(dat, year){
+  att_all <- subset(dat, !yr %in% c(2011, year))$ftt
+  att_dayr <- subset(dat, yr==year)$ftt
+  
+  # Set the break points for histogram
+  breakvals = seq(1, 21, by=1)
+  labelvals = seq(1, 20, by=1)
+  
+  # Define bins for each data point of histogram
+  att_all.cut = cut(att_all, breaks=breakvals, labels=labelvals,right=FALSE)
+  att_dayr.cut = cut(att_dayr, breaks=breakvals, labels=labelvals,right=FALSE)
+  
+  # populate bins delineated by breaks 
+  att_all.freq = table(att_all.cut)
+  att_dayr.freq = table(att_dayr.cut)
+  
+  # Calculate relative frequency
+  att_all.relfreq = att_all.freq/nrow(as.data.frame(att_all))
+  att_dayr.relfreq = att_dayr.freq/nrow(as.data.frame(att_dayr))
 
+  # use barplot to precisely control what you get...
+  ymax<- max(max(att_all.relfreq),max(att_dayr.relfreq))
+  barplot(att_all.relfreq, col=rgb(0,1,0,1/4), xlim=(c(1,23)), ylim=c(0,ymax),
+    xlab='Travel Time (Day)', ylab='Percent', main=paste('Travel Time,', year))
+  barplot(att_dayr.relfreq, col=rgb(1,0,0,1/4), xlim=(c(1,23)), add=T)
+  legend(15, ymax, c('Historical FTT','Observed FTT'), pch=15,
+    col=c('lightgreen','pink'), bty='n')
+  legend(15, ymax, c(' ',' '), pch=22, bty='n')
+}
+
+windows()
+par(mfrow=c(3,5))
+for(i in unique(pitflow2$yr)){
+  histhist(pitflow2, i)
+}
 
 
 

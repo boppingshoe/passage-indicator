@@ -37,7 +37,8 @@ tt_func<- function(dat, betties, year, strt, cutoff){
   vmtx<- cbind(1, subset(subdat2,
     select=c('sjday','sdis_ihr','skm','sihr_temp','mig_his') ))
   vmtx$mig_his<- ifelse(vmtx$mig_his=='trans', 1, 0)
-  fttsim<- betties %*% t(vmtx)
+  # fttsim<- betties %*% t(vmtx) # for inv gauss
+  fttsim<- 157/(betties %*% t(vmtx))
 
   # conversion rate
   jday2sim<- t(t(fttsim)+ subdat2$jday)
@@ -45,7 +46,7 @@ tt_func<- function(dat, betties, year, strt, cutoff){
   obsconv<- mean(!is.na(subdat$jday2))
   # travel time
   fttobs<- getCI(subdat$ftt)
-  fttsim<- fttsim[jday2sim<=en]
+  fttsim<- fttsim[jday2sim<=en & fttsim>0]
   # summary table for ftt, n and obs conv
   sumtab<- cbind(c("Min.", "2.5%", "Median","Mean", "97.5%", "Max."),
     round(fttobs, 3), round(getCI(fttsim),3))
@@ -53,7 +54,13 @@ tt_func<- function(dat, betties, year, strt, cutoff){
     cbind('n =', nrow(subdat), ' '),
     cbind('Obs Conv =', round(obsconv,3), ' ') )
   colnames(sumtab)<- c(' ','Observed', 'Predicted FTT')
-
+  # summary table for historical
+  hisdat<- subset(dat, jday>=st & jday<=en)
+  hisdat[hisdat$jday2>en|is.na(hisdat$jday2), c('jday2','ftt')]<- NA
+  sumhis<- cbind(c("Min.", "2.5%", "Median","Mean", "97.5%", "Max."),
+    round(fttobs, 3), round(getCI(hisdat$ftt),3))
+  colnames(sumhis)<- c(' ','Observed', 'Historical FTT')
+  
   out<- list()
   out$n<- nrow(subdat)
   out$sumtab<- sumtab
@@ -62,6 +69,8 @@ tt_func<- function(dat, betties, year, strt, cutoff){
   out$conall<- conall
   out$obsconv<- obsconv
   out$en<- en
+  out$hisdat<- hisdat
+  out$sumhis<- sumhis
   return(out)
 }
 # summarize cumulative conversion from 4/1, loop for every day in specified period
@@ -74,10 +83,9 @@ prep_it<- function(dat, betties, year, nsim, allDates){
   for(i in 1:length(allDates)){
     out<- tt_func(dat, betties, year, strt='04-01', cutoff=allDates[i])
     # conversion
-    # prep_out$conv_pre[,i]<- c(min(out$conall), mean(out$conall), max(out$conall))
-    prep_out$conv_pre[,i]<- c(quantile(out$conall,0.25),
-      median(out$conall), quantile(out$conall,0.75))
-    prep_out$conv_prehdi[,i]<- hdi(out$conall,0.70)
+    prep_out$conv_pre[,i]<- c(quantile(out$conall,0.15),
+      median(out$conall), quantile(out$conall,0.85))
+    prep_out$conv_prehdi[,i]<- hdi(out$conall,0.80)
     prep_out$conv_obs[i]<- out$obsconv
   }
   return(prep_out)
@@ -97,8 +105,33 @@ plot_conv<- function(a, b, year, conv_obs, conv_pre, conv_prehdi, hdiconv){
   lines(seq(a, b, 'day'), conv_pre[2,], lty=1, lwd=2)
   lines(seq(a, b, 'day'), conv_pre[3,], lty=2, lwd=1)
   lines(seq(a, b, 'day'), conv_obs, lwd=3, col='coral')
-  legend(a, 1.2, c('Observed','Predicted Median','50% Pred Interval'),
+  legend(a, 1.2, c('Observed','Predicted Median','70% Pred Interval'),
     lty=c(1,1,2), lwd=c(3,2,1), col=c('coral',1,1), bty='n')
+}
+# plot historical ftt dist
+histhist<- function(hisdat, year, strt, cutoff){
+  att_all <- subset(hisdat, !yr %in% c(2011, year))$ftt
+  att_dayr <- subset(hisdat, yr==year)$ftt
+  # Set the break points for histogram
+  breakvals = seq(1, 21, by=1)
+  labelvals = seq(1, 20, by=1)
+  # Define bins for each data point of histogram
+  att_all.cut = cut(att_all, breaks=breakvals, labels=labelvals,right=FALSE)
+  att_dayr.cut = cut(att_dayr, breaks=breakvals, labels=labelvals,right=FALSE)
+  # populate bins delineated by breaks 
+  att_all.freq = table(att_all.cut)
+  att_dayr.freq = table(att_dayr.cut)
+  # Calculate relative frequency
+  att_all.relfreq = att_all.freq/nrow(as.data.frame(att_all))
+  att_dayr.relfreq = att_dayr.freq/nrow(as.data.frame(att_dayr))
+  # use barplot to precisely control what you get...
+  ymax<- max(max(att_all.relfreq),max(att_dayr.relfreq))
+  barplot(att_all.relfreq, col=rgb(0,1,0,1/4), xlim=(c(1,23)), ylim=c(0,ymax),
+    xlab='Day', ylab='Percent', main=paste('Distribution of Travel Time,', year))
+  barplot(att_dayr.relfreq, col=rgb(1,0,0,1/4), xlim=(c(1,23)), add=T)
+  legend(15, ymax, c('Observed','Historical'), pch=15,
+    col=c('pink','lightgreen'), bty='n')
+  legend(15, ymax, c(' ',' '), pch=22, bty='n')
 }
 
 # Define UI for application that...
@@ -125,8 +158,7 @@ ui <- fluidPage(
         min = as.Date("2017-04-01","%Y-%m-%d"),
         max = as.Date("2017-06-30","%Y-%m-%d"),
         value = as.Date("2017-06-30"), timeFormat="%m/%d", step = 1),
-      # checkboxInput("allconv", "All Conv Prediction", FALSE),
-      checkboxInput("hdiconv", "70% HDI for Predicted Conversion", FALSE),
+      checkboxInput("hdiconv", "80% HDI for Predicted Conversion", FALSE),
       checkboxInput("colors", "< Median FTT", FALSE)
     ),
   
@@ -140,6 +172,11 @@ ui <- fluidPage(
         fluidRow(
           column(5, tableOutput("travel_time")),
           column(7, plotOutput("ftt_hist"))
+        ),
+        
+        fluidRow(
+          column(5, tableOutput("his_tabl")),
+          column(7, plotOutput("histhist"))
         )
       )
    )
@@ -164,16 +201,23 @@ server <- function(input, output) {
     da_yr<- pi_out()$da_yr
     n_sim<- pi_out()$nsim
     
-    mmdl<- glmer(ftt~ sjday+ sdis_ihr+ skm+ sihr_temp+ mig_his+ (1|yr),
-      data=subset(pitflow2, !yr %in% c(2011, da_yr)),
-      family=inverse.gaussian(link='identity') )
+    mmdl<- lmer(I(157/ftt)~ sjday+ sdis_ihr+ skm+ sihr_temp+ mig_his+ (1|yr),
+      data=subset(pitflow2, !yr %in% c(2011, da_yr)) )
     # betties<- sim(mmdl, n.sims=n_sim)@fixef # simulation using arm package
-    # or simulation based on inv gauss
     coefs<- fixef(mmdl)
     vcdf<- as.data.frame(VarCorr(mmdl))
-    varesp<- vcdf[vcdf$grp=='Residual', 'vcov']
-    betties<- as.matrix(cbind(rinvgauss(n_sim, mean=coefs[1], dispersion=varesp),
+    sdesp<- vcdf[vcdf$grp=='Residual', 'sdcor']
+    betties<- as.matrix(cbind(rnorm(n_sim, mean=coefs[1], sd=sdesp),
       coefs[2], coefs[3], coefs[4], coefs[5], coefs[6]))
+    # # or simulation based on inv gauss
+    # mmdl<- glmer(ftt~ sjday+ sdis_ihr+ skm+ sihr_temp+ mig_his+ (1|yr),
+    #   data=subset(pitflow2, !yr %in% c(2011, da_yr)),
+    #   family=inverse.gaussian(link='identity') )
+    # coefs<- fixef(mmdl)
+    # vcdf<- as.data.frame(VarCorr(mmdl))
+    # varesp<- vcdf[vcdf$grp=='Residual', 'vcov']
+    # betties<- as.matrix(cbind(rinvgauss(n_sim, mean=coefs[1], dispersion=varesp),
+    #   coefs[2], coefs[3], coefs[4], coefs[5], coefs[6]))
     return(betties)
   })
   
@@ -269,21 +313,36 @@ server <- function(input, output) {
       
       plot(fsimhis, freq=FALSE, col=rgb(0,0,0,.9), xlab='Day',
         main= paste('Distribution of Travel Time,', da_yr),
-        xlim=c(min(min(ftt), min(fttsim)), xmax),
-        ylim=c(0, ymax*1.1))
+        xlim=c(0, xmax), ylim=c(0, ymax*1.1))
+      # hisdat<- outtie()$hisdat
+      # hist(hisdat$ftt, breaks=50, freq=FALSE, col=rgb(0,1,0,.2), add=TRUE)
       if(input$colors==FALSE){
         hist(ftt, breaks=50, freq=FALSE, col=rgb(1,1,1,.5), add=TRUE)
         legend(xmax*0.8, ymax, c('Observed','Predicted'),
           pch=c(0,15), col=c(1,1), bty='n')
       } else{
-          colors<- ifelse(ftthis$breaks<median(ftt), rgb(0,0.255,0,.7), rgb(1,1,1,.5))
+          colors<- ifelse(ftthis$breaks<median(ftt), rgb(0.25,0,0,.7), rgb(1,1,1,.5))
           hist(ftt, breaks=50, freq=FALSE, col=colors, add=TRUE)
           legend(xmax*0.8, ymax, c('Observed','< median','Predicted'),
-            pch=c(0,15,15), col=c(1,rgb(0,0.255,0,.6),1), bty='n')
+            pch=c(0,15,15), col=c(1,rgb(0.25,0,0,.6),1), bty='n')
       }
     }
   })
-
+  
+  output$his_tabl <- renderTable({
+    if(pi_out()$da_yr>2004) {outtie()$sumhis}
+  })
+  
+  output$histhist <- renderPlot({
+    if(pi_out()$da_yr>2004) {
+      da_yr<- pi_out()$da_yr
+      strt<- format(input$strt, format='%m-%d')
+      cutoff<- format(input$cutoff, format='%m-%d')
+      hisdat<- outtie()$hisdat
+      
+      histhist(hisdat, da_yr, strt, cutoff)
+    }
+  })
 }
 
 # Run the application ----
