@@ -46,31 +46,32 @@ tt_func<- function(dat, betties, year, strt, cutoff){
   obsconv<- mean(!is.na(subdat$jday2))
   # travel time
   fttobs<- getCI(subdat$ftt)
-  fttsim<- fttsim[jday2sim<=en & fttsim>0]
-  # summary table for ftt, n and obs conv
-  sumtab<- cbind(c("Min.", "2.5%", "Median","Mean", "97.5%", "Max."),
-    round(fttobs, 3), round(getCI(fttsim),3))
-  sumtab<- rbind(sumtab,
-    cbind('n =', nrow(subdat), ' '),
-    cbind('Obs Conv =', round(obsconv,3), ' ') )
-  colnames(sumtab)<- c(' ','Observed', 'Predicted FTT')
+  # fttsim<- fttsim[jday2sim<=en & fttsim>0]
+  fttsim[jday2sim>en | fttsim<0]<- NA
+  # # summary table for ftt, n and obs conv
+  # sumtab<- cbind(c("Min.", "2.5%", "Median","Mean", "97.5%", "Max."),
+  #   round(fttobs, 3), round(getCI(fttsim),3))
+  # sumtab<- rbind(sumtab,
+  #   cbind('n =', nrow(subdat), ' '),
+  #   cbind('Obs Conv =', round(obsconv,3), ' ') )
+  # colnames(sumtab)<- c(' ','Observed', 'Predicted FTT')
   # summary table for historical
   hisdat<- subset(dat, jday>=st & jday<=en)
   hisdat[hisdat$jday2>en|is.na(hisdat$jday2), c('jday2','ftt')]<- NA
-  sumhis<- cbind(c("Min.", "2.5%", "Median","Mean", "97.5%", "Max."),
-    round(fttobs, 3), round(getCI(hisdat$ftt),3))
-  colnames(sumhis)<- c(' ','Observed', 'Historical FTT')
+  # sumhis<- cbind(c("Min.", "2.5%", "Median","Mean", "97.5%", "Max."),
+  #   round(fttobs, 3), round(getCI(hisdat$ftt),3))
+  # colnames(sumhis)<- c(' ','Observed', 'Historical FTT')
   
   out<- list()
   out$n<- nrow(subdat)
-  out$sumtab<- sumtab
+  # out$sumtab<- sumtab
   out$ftt<- subdat$ftt
   out$fttsim<- fttsim
   out$conall<- conall
   out$obsconv<- obsconv
   out$en<- en
   out$hisdat<- hisdat
-  out$sumhis<- sumhis
+  # out$sumhis<- sumhis
   return(out)
 }
 # summarize cumulative conversion from 4/1, loop for every day in specified period
@@ -159,7 +160,7 @@ ui <- fluidPage(
         max = as.Date("2017-06-30","%Y-%m-%d"),
         value = as.Date("2017-06-30"), timeFormat="%m/%d", step = 1),
       checkboxInput("hdiconv", "80% HDI for Predicted Conversion", FALSE),
-      checkboxInput("colors", "< Median FTT", FALSE)
+      checkboxInput("historic", "Historical Data", FALSE)
     ),
   
       # Show a plot of expected passage
@@ -169,14 +170,18 @@ ui <- fluidPage(
           column(6, plotOutput("pittag_counts"))
         ),
         
-        fluidRow(
-          column(5, tableOutput("travel_time")),
-          column(7, plotOutput("ftt_hist"))
-        ),
+        # fluidRow(
+        #   column(5, tableOutput("travel_time")),
+        #   column(7, plotOutput("ftt_hist"))
+        # ),
         
+        # fluidRow(
+        #   column(6, tableOutput("his_tabl")),
+        #   column(6, plotOutput("histhist"))
+        # )
         fluidRow(
-          column(5, tableOutput("his_tabl")),
-          column(7, plotOutput("histhist"))
+          column(6, plotOutput("histhist")),
+          column(6, plotOutput("ftt_hist"))
         )
       )
    )
@@ -296,46 +301,53 @@ server <- function(input, output) {
   
   # Display travel time summary table and a histogram -----
 
-  output$travel_time <- renderTable({
-    if(pi_out()$da_yr>2004) {outtie()$sumtab}
-  })
+  # output$travel_time <- renderTable({
+  #   if(pi_out()$da_yr>2004) {outtie()$sumtab}
+  # })
   
   output$ftt_hist <- renderPlot({
-    if(pi_out()$da_yr>2004) {
-      ftt<- outtie()$ftt[!is.na(outtie()$ftt)] # define travel time (obs)
-      fttsim<- outtie()$fttsim # ftt (simulated)
-      # define params for plotting
-      da_yr<- pi_out()$da_yr
-      fsimhis<- hist(fttsim, breaks=50, plot=FALSE)
-      ftthis<- hist(ftt, breaks=50, plot=FALSE)
-      xmax<- max(max(ftt), max(fttsim))
-      ymax<- max(max(fsimhis$density),max(ftthis$density))
-      
-      plot(fsimhis, freq=FALSE, col=rgb(0,0,0,.9), xlab='Day',
-        main= paste('Distribution of Travel Time,', da_yr),
-        xlim=c(0, xmax), ylim=c(0, ymax*1.1))
-      # hisdat<- outtie()$hisdat
-      # hist(hisdat$ftt, breaks=50, freq=FALSE, col=rgb(0,1,0,.2), add=TRUE)
-      if(input$colors==FALSE){
-        hist(ftt, breaks=50, freq=FALSE, col=rgb(1,1,1,.5), add=TRUE)
-        legend(xmax*0.8, ymax, c('Observed','Predicted'),
-          pch=c(0,15), col=c(1,1), bty='n')
+    da_yr<- pi_out()$da_yr
+    if(da_yr>2004) {
+      ftt<- outtie()$ftt # define travel time (obs)
+      ftt[is.na(ftt)]<- -10
+
+      if(input$historic==FALSE){
+        fttsim<- outtie()$fttsim # ftt (simulated)
+        fttsim[is.na(fttsim)]<- -10
+        xmax<- max(max(ftt), max(fttsim))
+        fshis<- hist(fttsim, breaks=seq(-10, ceiling(xmax), 1), plot=FALSE)
+        ftthis<- hist(ftt, breaks=seq(-10, ceiling(xmax), 1), plot=FALSE)
+        ymax<- max(max(fshis$density[-1]),max(ftthis$density[-1]))
+        bt<- 'Predicted'
       } else{
-          colors<- ifelse(ftthis$breaks<median(ftt), rgb(0.25,0,0,.7), rgb(1,1,1,.5))
-          hist(ftt, breaks=50, freq=FALSE, col=colors, add=TRUE)
-          legend(xmax*0.8, ymax, c('Observed','< median','Predicted'),
-            pch=c(0,15,15), col=c(1,rgb(0.25,0,0,.6),1), bty='n')
+        hisftt<- outtie()$hisdat$ftt # historical ftt
+        hisftt[is.na(hisftt)]<- -10
+        xmax<- max(max(ftt), max(hisftt))
+        fshis<- hist(hisftt, breaks=seq(-10, ceiling(xmax), 1), plot=FALSE)
+        ftthis<- hist(ftt, breaks=seq(-10, ceiling(xmax), 1), plot=FALSE)
+        ymax<- max(max(fshis$density[-1]),max(ftthis$density[-1]))
+        bt<- 'Historic'
       }
+      plot(fshis, freq=FALSE, col=rgb(0,0,0,.8),
+        xlab='Day', main= paste('Travel Time (IHR-LGR),', da_yr),
+        xlim=c(0, xmax+1), ylim=c(0, ymax*1.2))
+      hist(ftt, breaks=seq(-10, ceiling(xmax), 1), freq=FALSE,
+        col=rgb(1,1,1,.5), add=TRUE)
+      legend(xmax*.6, ymax*1.3,
+        c( paste('n=', outtie()$n),
+          paste('Observed=',round(sum(ftthis$density[-1]),3)),
+          paste0(bt,'= ',round(sum(fshis$density[-1]),3)) ),
+        pch=c(1,0,15), col=c('white',1,1), bty='n')
     }
   })
   
-  output$his_tabl <- renderTable({
-    if(pi_out()$da_yr>2004) {outtie()$sumhis}
-  })
+  # output$his_tabl <- renderTable({
+  #   if(pi_out()$da_yr>2004) {outtie()$sumhis}
+  # })
   
   output$histhist <- renderPlot({
-    if(pi_out()$da_yr>2004) {
-      da_yr<- pi_out()$da_yr
+    da_yr<- pi_out()$da_yr
+    if(da_yr>2004) {
       strt<- format(input$strt, format='%m-%d')
       cutoff<- format(input$cutoff, format='%m-%d')
       hisdat<- outtie()$hisdat
