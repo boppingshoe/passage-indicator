@@ -3,23 +3,12 @@
 
 library(shiny)
 library(arm)
-library(statmod)
 library(HDInterval)
-load(file= 'data/ad_dat.Rdata')
-load(file= 'data/pitflow2.Rdata')
+load(file= 'data/ad_dat.Rdata') # LMN to LGS counts
+load(file= 'data/pitflow2.Rdata') # IHR to LGR PIT tags
+load(file= 'data/pit_flow.Rdata') # LMN to LGS PIT tags
 options(scipen=999) # keep plot from displaying scientific notation
 
-# summary stats
-getCI <- function(ms) {
-  result <- rep(NA, 6)
-  result[1] <- min(ms, na.rm = TRUE)
-  result[2] <- quantile(ms, 0.025, na.rm = TRUE)
-  result[3] <- median(ms, na.rm = TRUE)
-  result[4] <- mean(ms, na.rm = TRUE)
-  result[5] <- quantile(ms, 0.975, na.rm = TRUE)
-  result[6] <- max(ms, na.rm = TRUE)
-  return(result)
-}
 # travel time function
 tt_func<- function(dat, betties, year, strt, cutoff){
 
@@ -37,41 +26,26 @@ tt_func<- function(dat, betties, year, strt, cutoff){
   vmtx<- cbind(1, subset(subdat2,
     select=c('sjday','sdis_ihr','skm','sihr_temp','mig_his') ))
   vmtx$mig_his<- ifelse(vmtx$mig_his=='trans', 1, 0)
-  # fttsim<- betties %*% t(vmtx) # for inv gauss
   fttsim<- 157/(betties %*% t(vmtx))
 
   # conversion rate
   jday2sim<- t(t(fttsim)+ subdat2$jday)
   conall<- apply(jday2sim, 1, function(x) sum(ceiling(x)<=en)/nrow(subdat) )
   obsconv<- mean(!is.na(subdat$jday2))
-  # travel time
-  fttobs<- getCI(subdat$ftt)
-  # fttsim<- fttsim[jday2sim<=en & fttsim>0]
+  # simulated travel time
   fttsim[jday2sim>en | fttsim<0]<- NA
-  # # summary table for ftt, n and obs conv
-  # sumtab<- cbind(c("Min.", "2.5%", "Median","Mean", "97.5%", "Max."),
-  #   round(fttobs, 3), round(getCI(fttsim),3))
-  # sumtab<- rbind(sumtab,
-  #   cbind('n =', nrow(subdat), ' '),
-  #   cbind('Obs Conv =', round(obsconv,3), ' ') )
-  # colnames(sumtab)<- c(' ','Observed', 'Predicted FTT')
-  # summary table for historical
+  # historical travel time
   hisdat<- subset(dat, jday>=st & jday<=en)
   hisdat[hisdat$jday2>en|is.na(hisdat$jday2), c('jday2','ftt')]<- NA
-  # sumhis<- cbind(c("Min.", "2.5%", "Median","Mean", "97.5%", "Max."),
-  #   round(fttobs, 3), round(getCI(hisdat$ftt),3))
-  # colnames(sumhis)<- c(' ','Observed', 'Historical FTT')
-  
+
   out<- list()
   out$n<- nrow(subdat)
-  # out$sumtab<- sumtab
   out$ftt<- subdat$ftt
   out$fttsim<- fttsim
   out$conall<- conall
   out$obsconv<- obsconv
   out$en<- en
   out$hisdat<- hisdat
-  # out$sumhis<- sumhis
   return(out)
 }
 # summarize cumulative conversion from 4/1, loop for every day in specified period
@@ -95,7 +69,7 @@ prep_it<- function(dat, betties, year, nsim, allDates){
 plot_conv<- function(a, b, year, conv_obs, conv_pre, conv_prehdi, hdiconv){
   plot(a,0, xlim=c(a,b),
     ylim=c(min(min(conv_obs, na.rm=TRUE), min(conv_pre, na.rm=TRUE))-0.05, 1.2),
-    main=year, xlab=NA, ylab='Conversion', ty='n')
+    main=paste('IHR to LGR,',year), xlab=NA, ylab='Cumulative Conversion', ty='n')
   
   if(hdiconv==TRUE) {
     lines(seq(a, b, 'day'), conv_prehdi[1,], col='red')
@@ -110,30 +84,43 @@ plot_conv<- function(a, b, year, conv_obs, conv_pre, conv_prehdi, hdiconv){
     lty=c(1,1,2), lwd=c(3,2,1), col=c('coral',1,1), bty='n')
 }
 # plot historical ftt dist
-histhist<- function(hisdat, year, strt, cutoff){
-  att_all <- subset(hisdat, !yr %in% c(2011, year))$ftt
-  att_dayr <- subset(hisdat, yr==year)$ftt
-  # Set the break points for histogram
-  breakvals = seq(1, 21, by=1)
-  labelvals = seq(1, 20, by=1)
-  # Define bins for each data point of histogram
-  att_all.cut = cut(att_all, breaks=breakvals, labels=labelvals,right=FALSE)
-  att_dayr.cut = cut(att_dayr, breaks=breakvals, labels=labelvals,right=FALSE)
-  # populate bins delineated by breaks 
-  att_all.freq = table(att_all.cut)
-  att_dayr.freq = table(att_dayr.cut)
-  # Calculate relative frequency
-  att_all.relfreq = att_all.freq/nrow(as.data.frame(att_all))
-  att_dayr.relfreq = att_dayr.freq/nrow(as.data.frame(att_dayr))
-  # use barplot to precisely control what you get...
-  ymax<- max(max(att_all.relfreq),max(att_dayr.relfreq))
-  barplot(att_all.relfreq, col=rgb(0,1,0,1/4), xlim=(c(1,23)), ylim=c(0,ymax),
-    xlab='Day', ylab='Percent', main=paste('Distribution of Travel Time,', year))
-  barplot(att_dayr.relfreq, col=rgb(1,0,0,1/4), xlim=(c(1,23)), add=T)
-  legend(15, ymax, c('Observed','Historical'), pch=15,
-    col=c('pink','lightgreen'), bty='n')
-  legend(15, ymax, c(' ',' '), pch=22, bty='n')
-}
+# histhist<- function(dat, year, strt, cutoff){
+#   st<- as.numeric(format(as.Date(paste0(year, '-', strt)), format='%j'))
+#   en<- as.numeric(format(as.Date(paste0(year, '-', cutoff)), format='%j'))
+#   hisdat<- dat
+#   # att_all <- subset(hisdat, !yr %in% c(2011, year))$ftt
+#   hisdat$jday2<- as.numeric(format(hisdat$goa_obs, format='%j'))
+#   hisdat<- subset(hisdat, jday>=st & jday<=en)
+#   hisdat$ftt<- hisdat$ftt_l2g/24
+#   hisdat[hisdat$jday2>en|is.na(hisdat$jday2),]$ftt<- NA
+#   att_all <- subset(hisdat, yr!=year)$ftt
+#   att_dayr <- subset(hisdat, yr==year)$ftt
+#   # Set the break points for histogram
+#   breakvals = seq(1, 21, by=1)
+#   labelvals = seq(1, 20, by=1)
+#   # Define bins for each data point of histogram
+#   att_all.cut = cut(att_all, breaks=breakvals, labels=labelvals,right=FALSE)
+#   att_dayr.cut = cut(att_dayr, breaks=breakvals, labels=labelvals,right=FALSE)
+#   # populate bins delineated by breaks 
+#   att_all.freq = table(att_all.cut)
+#   att_dayr.freq = table(att_dayr.cut)
+#   # Calculate relative frequency
+#   att_all.relfreq = att_all.freq/nrow(as.data.frame(att_all))
+#   att_dayr.relfreq = att_dayr.freq/nrow(as.data.frame(att_dayr))
+#   # use barplot to precisely control what you get...
+#   ymax<- max(max(att_all.relfreq),max(att_dayr.relfreq))
+#   barplot(att_all.relfreq, col=rgb(0,1,0,1/4), xlim=(c(1,23)), ylim=c(0,ymax),
+#     xlab='Day', ylab='Percent', main=paste('LMN-LGS Travel Time (% Passed),', year))
+#   barplot(att_dayr.relfreq, col=rgb(1,0,0,1/4), xlim=(c(1,23)), add=T)
+#   # legend(15, ymax, c('Observed','Historic'), pch=15,
+#   #   col=c('pink','lightgreen'), bty='n')
+#   legend(15, ymax,
+#     c( paste('n=', length(att_dayr)),
+#       paste0('Observed (',round(sum(att_dayr.relfreq)*100, 1),'%)'),
+#       paste0('Historic (',round(sum(att_all.relfreq)*100, 1),'%)') ),
+#     pch=c(1,15,15), col=c('white','pink','lightgreen'), bty='n')
+#   legend(15, ymax, c(' ',' ',' '), pch=22, col=c('white',1,1), bty='n')
+# }
 
 # Define UI for application that...
 # make sliders and buttons ----
@@ -170,15 +157,6 @@ ui <- fluidPage(
           column(6, plotOutput("pittag_counts"))
         ),
         
-        # fluidRow(
-        #   column(5, tableOutput("travel_time")),
-        #   column(7, plotOutput("ftt_hist"))
-        # ),
-        
-        # fluidRow(
-        #   column(6, tableOutput("his_tabl")),
-        #   column(6, plotOutput("histhist"))
-        # )
         fluidRow(
           column(6, plotOutput("histhist")),
           column(6, plotOutput("ftt_hist"))
@@ -208,21 +186,11 @@ server <- function(input, output) {
     
     mmdl<- lmer(I(157/ftt)~ sjday+ sdis_ihr+ skm+ sihr_temp+ mig_his+ (1|yr),
       data=subset(pitflow2, !yr %in% c(2011, da_yr)) )
-    # betties<- sim(mmdl, n.sims=n_sim)@fixef # simulation using arm package
     coefs<- fixef(mmdl)
     vcdf<- as.data.frame(VarCorr(mmdl))
     sdesp<- vcdf[vcdf$grp=='Residual', 'sdcor']
     betties<- as.matrix(cbind(rnorm(n_sim, mean=coefs[1], sd=sdesp),
       coefs[2], coefs[3], coefs[4], coefs[5], coefs[6]))
-    # # or simulation based on inv gauss
-    # mmdl<- glmer(ftt~ sjday+ sdis_ihr+ skm+ sihr_temp+ mig_his+ (1|yr),
-    #   data=subset(pitflow2, !yr %in% c(2011, da_yr)),
-    #   family=inverse.gaussian(link='identity') )
-    # coefs<- fixef(mmdl)
-    # vcdf<- as.data.frame(VarCorr(mmdl))
-    # varesp<- vcdf[vcdf$grp=='Residual', 'vcov']
-    # betties<- as.matrix(cbind(rinvgauss(n_sim, mean=coefs[1], dispersion=varesp),
-    #   coefs[2], coefs[3], coefs[4], coefs[5], coefs[6]))
     return(betties)
   })
   
@@ -260,7 +228,8 @@ server <- function(input, output) {
     plyr<- subset(ad_dat, 
       obs_yr==da_yr & as.numeric(format(obs_date, format='%j'))<=outtie()$en)
     with(subset(ad_dat, obs_yr==da_yr), 
-      plot(obs_date, cumsum(lgs), pch= 20, main= da_yr, ylim= c(0, sum(lgs)+10000),
+      plot(obs_date, cumsum(lgs), pch= 20, main= paste('LMN & LGS Counts,', da_yr),
+        ylim= c(0, sum(lgs)+10000),
         xlim= as.Date(c(paste0(da_yr,"-04-15"), paste0(da_yr,"-06-30"))),
         xaxt='n', xlab= NA, ylab= 'Cumulative Counts', ty='n'))
     mrk<- seq(as.Date(paste0(da_yr,"-04-15")), as.Date(paste0(da_yr,"-07-01")), "week")
@@ -299,12 +268,51 @@ server <- function(input, output) {
     plot_conv(a, b, da_yr, prep_out$conv_obs, prep_out$conv_pre, prep_out$conv_prehdi, input$hdiconv)
   })
   
-  # Display travel time summary table and a histogram -----
+  # Display travel time histograms -----
 
-  # output$travel_time <- renderTable({
-  #   if(pi_out()$da_yr>2004) {outtie()$sumtab}
+  # output$histhist <- renderPlot({
+  #   da_yr<- pi_out()$da_yr
+  #   if(da_yr>2013) {
+  #     strt<- format(input$strt, format='%m-%d')
+  #     cutoff<- format(input$cutoff, format='%m-%d')
+  # 
+  #     histhist(pit_flow, da_yr, strt, cutoff)
+  #   }
   # })
   
+  output$histhist <- renderPlot({
+    da_yr<- pi_out()$da_yr
+    if(da_yr>2013) {
+      strt<- format(input$strt, format='%m-%d')
+      cutoff<- format(input$cutoff, format='%m-%d')
+      st<- as.numeric(format(as.Date(paste0(da_yr, '-', strt)), format='%j'))
+      en<- as.numeric(format(as.Date(paste0(da_yr, '-', cutoff)), format='%j'))
+      pit_flow$jday2<- as.numeric(format(pit_flow$goa_obs, format='%j'))
+      pit_flow<- subset(pit_flow, jday>=st & jday<=en)
+      pit_flow$ftt<- pit_flow$ftt_l2g/24
+      pit_flow[pit_flow$jday2>en|is.na(pit_flow$jday2),]$ftt<- -10
+      hisftt <- subset(pit_flow, !yr%in%c(2017,da_yr))$ftt # historical ftt
+      ftt <- subset(pit_flow, yr==da_yr)$ftt # travel time (obs)
+
+      xmax<- max(max(ftt), max(hisftt))
+      fshis<- hist(hisftt, breaks=seq(-10, ceiling(xmax), 1), plot=FALSE)
+      ftthis<- hist(ftt, breaks=seq(-10, ceiling(xmax), 1), plot=FALSE)
+      ymax<- max(max(fshis$density[-1]),max(ftthis$density[-1]))
+
+      plot(fshis, freq=FALSE, col=rgb(0,0,0,.8),
+        xlab='Day', main= paste('LMN-LGS Travel Time (% Passed),', da_yr),
+        xlim=c(0, xmax+1), ylim=c(0, ymax*1.2))
+      hist(ftt, breaks=seq(-10, ceiling(xmax), 1), freq=FALSE,
+        col=rgb(1,1,1,.5), add=TRUE)
+      legend(xmax*.6, ymax*1.3,
+        c( paste('n=', length(ftt)),
+          paste0('Observed (',round(sum(ftthis$density[-1])*100, 1),'%)'),
+          paste0('Historic (',round(sum(fshis$density[-1])*100, 1),'%)') ),
+        pch=c(1,0,15), col=c('white',1,1), bty='n')
+    }
+  })
+  
+
   output$ftt_hist <- renderPlot({
     da_yr<- pi_out()$da_yr
     if(da_yr>2004) {
@@ -329,34 +337,18 @@ server <- function(input, output) {
         bt<- 'Historic'
       }
       plot(fshis, freq=FALSE, col=rgb(0,0,0,.8),
-        xlab='Day', main= paste('Travel Time (IHR-LGR),', da_yr),
+        xlab='Day', main= paste('IHR-LGR Travel Time (% Passed),', da_yr),
         xlim=c(0, xmax+1), ylim=c(0, ymax*1.2))
       hist(ftt, breaks=seq(-10, ceiling(xmax), 1), freq=FALSE,
         col=rgb(1,1,1,.5), add=TRUE)
       legend(xmax*.6, ymax*1.3,
         c( paste('n=', outtie()$n),
-          paste('Observed=',round(sum(ftthis$density[-1]),3)),
-          paste0(bt,'= ',round(sum(fshis$density[-1]),3)) ),
+          paste0('Observed (',round(sum(ftthis$density[-1])*100, 1),'%)'),
+          paste0(bt,' (',round(sum(fshis$density[-1])*100, 1),'%)') ),
         pch=c(1,0,15), col=c('white',1,1), bty='n')
     }
   })
-  
-  # output$his_tabl <- renderTable({
-  #   if(pi_out()$da_yr>2004) {outtie()$sumhis}
-  # })
-  
-  output$histhist <- renderPlot({
-    da_yr<- pi_out()$da_yr
-    if(da_yr>2004) {
-      strt<- format(input$strt, format='%m-%d')
-      cutoff<- format(input$cutoff, format='%m-%d')
-      hisdat<- outtie()$hisdat
-      
-      histhist(hisdat, da_yr, strt, cutoff)
-    }
-  })
 }
-
 # Run the application ----
 shinyApp(ui = ui, server = server)
 
