@@ -3,7 +3,7 @@
 
 library(shiny)
 library(arm)
-library(HDInterval)
+# library(HDInterval)
 load(file= 'data/ad_dat.Rdata') # LMN to LGS counts
 load(file= 'data/pitflow2.Rdata') # IHR to LGR PIT tags
 load(file= 'data/pit_flow.Rdata') # LMN to LGS PIT tags
@@ -52,7 +52,7 @@ tt_func<- function(dat, betties, year, strt, cutoff){
 prep_it<- function(dat, betties, year, nsim, allDates){
   prep_out<- list()
   prep_out$conv_pre<- matrix(NA, nrow=3, ncol=length(allDates))
-  prep_out$conv_prehdi<- matrix(NA, nrow=2, ncol=length(allDates))
+  # prep_out$conv_prehdi<- matrix(NA, nrow=2, ncol=length(allDates))
   prep_out$conv_obs<- rep(NA, length(allDates))
   
   for(i in 1:length(allDates)){
@@ -60,21 +60,21 @@ prep_it<- function(dat, betties, year, nsim, allDates){
     # conversion
     prep_out$conv_pre[,i]<- c(quantile(out$conall,0.15),
       median(out$conall), quantile(out$conall,0.85))
-    prep_out$conv_prehdi[,i]<- hdi(out$conall,0.80)
+    # prep_out$conv_prehdi[,i]<- hdi(out$conall,0.80)
     prep_out$conv_obs[i]<- out$obsconv
   }
   return(prep_out)
 }
 # conv summary plots function
-plot_conv<- function(a, b, year, conv_obs, conv_pre, conv_prehdi, hdiconv){
+plot_conv<- function(a, b, year, conv_obs, conv_pre){#, conv_prehdi, hdiconv){
   plot(a,0, xlim=c(a,b),
     ylim=c(min(min(conv_obs, na.rm=TRUE), min(conv_pre, na.rm=TRUE))-0.05, 1.2),
     main=paste('IHR to LGR,',year), xlab=NA, ylab='Cumulative Conversion', ty='n')
   
-  if(hdiconv==TRUE) {
-    lines(seq(a, b, 'day'), conv_prehdi[1,], col='red')
-    lines(seq(a, b, 'day'), conv_prehdi[2,], col='red')
-  }
+  # if(hdiconv==TRUE) {
+  #   lines(seq(a, b, 'day'), conv_prehdi[1,], col='red')
+  #   lines(seq(a, b, 'day'), conv_prehdi[2,], col='red')
+  # }
   
   lines(seq(a, b, 'day'), conv_pre[1,], lty=2, lwd=1)
   lines(seq(a, b, 'day'), conv_pre[2,], lty=1, lwd=2)
@@ -146,8 +146,8 @@ ui <- fluidPage(
         min = as.Date("2017-04-01","%Y-%m-%d"),
         max = as.Date("2017-06-30","%Y-%m-%d"),
         value = as.Date("2017-06-30"), timeFormat="%m/%d", step = 1),
-      checkboxInput("hdiconv", "80% HDI for Predicted Conversion", FALSE),
-      checkboxInput("historic", "Historical Data", FALSE)
+      # checkboxInput("hdiconv", "80% HDI for Predicted Conversion", FALSE),
+      checkboxInput("historic", "Historical Data for IHR-LGR", FALSE)
     ),
   
       # Show a plot of expected passage
@@ -265,7 +265,7 @@ server <- function(input, output) {
     allDates <- format(seq(a, b, 'day'), format='%m-%d')
     
     prep_out<- prep_it(pitflow2, betties, da_yr, n_sim, allDates)
-    plot_conv(a, b, da_yr, prep_out$conv_obs, prep_out$conv_pre, prep_out$conv_prehdi, input$hdiconv)
+    plot_conv(a, b, da_yr, prep_out$conv_obs, prep_out$conv_pre)#, prep_out$conv_prehdi, input$hdiconv)
   })
   
   # Display travel time histograms -----
@@ -300,8 +300,8 @@ server <- function(input, output) {
       ymax<- max(max(fshis$density[-1]),max(ftthis$density[-1]))
 
       plot(fshis, freq=FALSE, col=rgb(0,0,0,.8),
-        xlab='Day', main= paste('LMN-LGS Travel Time (% Passed),', da_yr),
-        xlim=c(0, xmax+1), ylim=c(0, ymax*1.2))
+        xlab='Days', main= paste('LMN-LGS Travel Time (% Passed),', da_yr),
+        xlim=c(0, max(25, xmax+1)), ylim=c(0, ymax*1.2))
       hist(ftt, breaks=seq(-10, ceiling(xmax), 1), freq=FALSE,
         col=rgb(1,1,1,.5), add=TRUE)
       legend(xmax*.6, ymax*1.3,
@@ -337,8 +337,8 @@ server <- function(input, output) {
         bt<- 'Historic'
       }
       plot(fshis, freq=FALSE, col=rgb(0,0,0,.8),
-        xlab='Day', main= paste('IHR-LGR Travel Time (% Passed),', da_yr),
-        xlim=c(0, xmax+1), ylim=c(0, ymax*1.2))
+        xlab='Days', main= paste('IHR-LGR Travel Time (% Passed),', da_yr),
+        xlim=c(0, max(25, xmax+1)), ylim=c(0, ymax*1.2))
       hist(ftt, breaks=seq(-10, ceiling(xmax), 1), freq=FALSE,
         col=rgb(1,1,1,.5), add=TRUE)
       legend(xmax*.6, ymax*1.3,
