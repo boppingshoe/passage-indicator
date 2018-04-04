@@ -3,7 +3,6 @@
 
 library(shiny)
 library(arm)
-# library(HDInterval)
 load(file= 'data/ad_dat.Rdata') # LMN to LGS counts
 load(file= 'data/pitflow2.Rdata') # IHR to LGR PIT tags
 load(file= 'data/pit_flow.Rdata') # LMN to LGS PIT tags
@@ -52,7 +51,6 @@ tt_func<- function(dat, betties, year, strt, cutoff){
 prep_it<- function(dat, betties, year, nsim, allDates){
   prep_out<- list()
   prep_out$conv_pre<- matrix(NA, nrow=3, ncol=length(allDates))
-  # prep_out$conv_prehdi<- matrix(NA, nrow=2, ncol=length(allDates))
   prep_out$conv_obs<- rep(NA, length(allDates))
   
   for(i in 1:length(allDates)){
@@ -60,7 +58,6 @@ prep_it<- function(dat, betties, year, nsim, allDates){
     # conversion
     prep_out$conv_pre[,i]<- c(quantile(out$conall,0.15),
       median(out$conall), quantile(out$conall,0.85))
-    # prep_out$conv_prehdi[,i]<- hdi(out$conall,0.80)
     prep_out$conv_obs[i]<- out$obsconv
   }
   return(prep_out)
@@ -71,11 +68,6 @@ plot_conv<- function(a, b, year, conv_obs, conv_pre){#, conv_prehdi, hdiconv){
     ylim=c(min(min(conv_obs, na.rm=TRUE), min(conv_pre, na.rm=TRUE))-0.05, 1.2),
     main=paste('IHR to LGR,',year), xlab=NA, ylab='Cumulative Conversion', ty='n')
   
-  # if(hdiconv==TRUE) {
-  #   lines(seq(a, b, 'day'), conv_prehdi[1,], col='red')
-  #   lines(seq(a, b, 'day'), conv_prehdi[2,], col='red')
-  # }
-  
   lines(seq(a, b, 'day'), conv_pre[1,], lty=2, lwd=1)
   lines(seq(a, b, 'day'), conv_pre[2,], lty=1, lwd=2)
   lines(seq(a, b, 'day'), conv_pre[3,], lty=2, lwd=1)
@@ -83,44 +75,6 @@ plot_conv<- function(a, b, year, conv_obs, conv_pre){#, conv_prehdi, hdiconv){
   legend(a, 1.2, c('Observed','Predicted Median','70% Pred Interval'),
     lty=c(1,1,2), lwd=c(3,2,1), col=c('coral',1,1), bty='n')
 }
-# plot historical ftt dist
-# histhist<- function(dat, year, strt, cutoff){
-#   st<- as.numeric(format(as.Date(paste0(year, '-', strt)), format='%j'))
-#   en<- as.numeric(format(as.Date(paste0(year, '-', cutoff)), format='%j'))
-#   hisdat<- dat
-#   # att_all <- subset(hisdat, !yr %in% c(2011, year))$ftt
-#   hisdat$jday2<- as.numeric(format(hisdat$goa_obs, format='%j'))
-#   hisdat<- subset(hisdat, jday>=st & jday<=en)
-#   hisdat$ftt<- hisdat$ftt_l2g/24
-#   hisdat[hisdat$jday2>en|is.na(hisdat$jday2),]$ftt<- NA
-#   att_all <- subset(hisdat, yr!=year)$ftt
-#   att_dayr <- subset(hisdat, yr==year)$ftt
-#   # Set the break points for histogram
-#   breakvals = seq(1, 21, by=1)
-#   labelvals = seq(1, 20, by=1)
-#   # Define bins for each data point of histogram
-#   att_all.cut = cut(att_all, breaks=breakvals, labels=labelvals,right=FALSE)
-#   att_dayr.cut = cut(att_dayr, breaks=breakvals, labels=labelvals,right=FALSE)
-#   # populate bins delineated by breaks 
-#   att_all.freq = table(att_all.cut)
-#   att_dayr.freq = table(att_dayr.cut)
-#   # Calculate relative frequency
-#   att_all.relfreq = att_all.freq/nrow(as.data.frame(att_all))
-#   att_dayr.relfreq = att_dayr.freq/nrow(as.data.frame(att_dayr))
-#   # use barplot to precisely control what you get...
-#   ymax<- max(max(att_all.relfreq),max(att_dayr.relfreq))
-#   barplot(att_all.relfreq, col=rgb(0,1,0,1/4), xlim=(c(1,23)), ylim=c(0,ymax),
-#     xlab='Day', ylab='Percent', main=paste('LMN-LGS Travel Time (% Passed),', year))
-#   barplot(att_dayr.relfreq, col=rgb(1,0,0,1/4), xlim=(c(1,23)), add=T)
-#   # legend(15, ymax, c('Observed','Historic'), pch=15,
-#   #   col=c('pink','lightgreen'), bty='n')
-#   legend(15, ymax,
-#     c( paste('n=', length(att_dayr)),
-#       paste0('Observed (',round(sum(att_dayr.relfreq)*100, 1),'%)'),
-#       paste0('Historic (',round(sum(att_all.relfreq)*100, 1),'%)') ),
-#     pch=c(1,15,15), col=c('white','pink','lightgreen'), bty='n')
-#   legend(15, ymax, c(' ',' ',' '), pch=22, col=c('white',1,1), bty='n')
-# }
 
 # Define UI for application that...
 # make sliders and buttons ----
@@ -146,7 +100,6 @@ ui <- fluidPage(
         min = as.Date("2017-04-01","%Y-%m-%d"),
         max = as.Date("2017-06-30","%Y-%m-%d"),
         value = as.Date("2017-06-30"), timeFormat="%m/%d", step = 1),
-      # checkboxInput("hdiconv", "80% HDI for Predicted Conversion", FALSE),
       checkboxInput("historic", "Historical Data for IHR-LGR", FALSE)
     ),
   
@@ -265,20 +218,8 @@ server <- function(input, output) {
     allDates <- format(seq(a, b, 'day'), format='%m-%d')
     
     prep_out<- prep_it(pitflow2, betties, da_yr, n_sim, allDates)
-    plot_conv(a, b, da_yr, prep_out$conv_obs, prep_out$conv_pre)#, prep_out$conv_prehdi, input$hdiconv)
+    plot_conv(a, b, da_yr, prep_out$conv_obs, prep_out$conv_pre)
   })
-  
-  # Display travel time histograms -----
-
-  # output$histhist <- renderPlot({
-  #   da_yr<- pi_out()$da_yr
-  #   if(da_yr>2013) {
-  #     strt<- format(input$strt, format='%m-%d')
-  #     cutoff<- format(input$cutoff, format='%m-%d')
-  # 
-  #     histhist(pit_flow, da_yr, strt, cutoff)
-  #   }
-  # })
   
   output$histhist <- renderPlot({
     da_yr<- pi_out()$da_yr
@@ -312,7 +253,6 @@ server <- function(input, output) {
     }
   })
   
-
   output$ftt_hist <- renderPlot({
     da_yr<- pi_out()$da_yr
     if(da_yr>2004) {
