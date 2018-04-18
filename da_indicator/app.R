@@ -3,11 +3,13 @@
 
 library(shiny)
 library(arm)
+options(scipen=999) # keep plot from displaying scientific notation
+# data ----
 load(file= 'data/ad_dat.Rdata') # LMN to LGS counts
 load(file= 'data/pitflow2.Rdata') # IHR to LGR PIT tags
 load(file= 'data/pit_flow.Rdata') # LMN to LGS PIT tags
-options(scipen=999) # keep plot from displaying scientific notation
 
+# non-reactive functions ----
 # travel time function
 tt_func<- function(dat, betties, year, strt, cutoff){
 
@@ -76,12 +78,12 @@ plot_conv<- function(a, b, year, conv_obs, conv_pre){#, conv_prehdi, hdiconv){
     lty=c(1,1,2), lwd=c(3,2,1), col=c('coral',1,1), bty='n')
 }
 
-# Define UI for application that...
+# Define UI for application that... ----
 # make sliders and buttons ----
 ui <- fluidPage(
    
   # Application title
-   titlePanel("LGS Passage Indicator"),
+   titlePanel("Passage Indicator"),
    
   # Sidebar with a slider input for which year to predict
   sidebarLayout(
@@ -106,21 +108,21 @@ ui <- fluidPage(
       # Show a plot of expected passage
       mainPanel(
         fluidRow(
-          column(6, plotOutput("passage_plot")),
-          column(6, plotOutput("pittag_counts"))
+          column(6, plotOutput("lmn_lgs_counts")),
+          column(6, plotOutput("ihr_lgr_pittag"))
         ),
         
         fluidRow(
-          column(6, plotOutput("histhist")),
-          column(6, plotOutput("ftt_hist"))
+          column(6, plotOutput("lmn_lgs_dist")),
+          column(6, plotOutput("ihr_lgr_dist"))
         )
       )
    )
 )
 
 # Define server logic required to display plots and table ----
-
 server <- function(input, output) {
+  # reactive functions ----
   pi_out<- reactive({
     input$reload # reload simulation
     isolate({
@@ -130,33 +132,8 @@ server <- function(input, output) {
       po$cutoff<- format(input$cutoff, format='%m-%d')
       return(po)
     })
-  })
-
-  # travel time model calculate here ----
-  tt_betties<- reactive({
-    da_yr<- pi_out()$da_yr
-    n_sim<- pi_out()$nsim
-    
-    mmdl<- lmer(I(157/ftt)~ sjday+ sdis_ihr+ skm+ sihr_temp+ mig_his+ (1|yr),
-      data=subset(pitflow2, !yr %in% c(2011, da_yr)) )
-    coefs<- fixef(mmdl)
-    vcdf<- as.data.frame(VarCorr(mmdl))
-    sdesp<- vcdf[vcdf$grp=='Residual', 'sdcor']
-    betties<- as.matrix(cbind(rnorm(n_sim, mean=coefs[1], sd=sdesp),
-      coefs[2], coefs[3], coefs[4], coefs[5], coefs[6]))
-    return(betties)
-  })
+  }) # parameter input
   
-  outtie<- reactive({ # output from tt_func
-    da_yr<- pi_out()$da_yr
-    betties<- tt_betties()
-    strt<- format(input$strt, format='%m-%d')
-    cutoff<- format(input$cutoff, format='%m-%d')
-    tt_func(pitflow2, betties, da_yr, strt, cutoff)
-  })
-  
-  # Display a plot for expected counts ----
-
   ct_mdl<- reactive({
     da_yr<- pi_out()$da_yr
     n_sim<- pi_out()$nsim
@@ -170,9 +147,32 @@ server <- function(input, output) {
     mdlout$n_sim<- n_sim
     mdlout$sim1<- sim1
     return(mdlout)
-  })
+  }) # fit dam counts model
 
-  output$passage_plot <- renderPlot({
+  tt_betties<- reactive({
+    da_yr<- pi_out()$da_yr
+    n_sim<- pi_out()$nsim
+    
+    mmdl<- lmer(I(157/ftt)~ sjday+ sdis_ihr+ skm+ sihr_temp+ mig_his+ (1|yr),
+      data=subset(pitflow2, !yr %in% c(2011, da_yr)) )
+    coefs<- fixef(mmdl)
+    vcdf<- as.data.frame(VarCorr(mmdl))
+    sdesp<- vcdf[vcdf$grp=='Residual', 'sdcor']
+    betties<- as.matrix(cbind(rnorm(n_sim, mean=coefs[1], sd=sdesp),
+      coefs[2], coefs[3], coefs[4], coefs[5], coefs[6]))
+    return(betties)
+  }) # fit travel time (pit-tag) model
+  
+  outtie<- reactive({
+    da_yr<- pi_out()$da_yr
+    betties<- tt_betties()
+    strt<- format(input$strt, format='%m-%d')
+    cutoff<- format(input$cutoff, format='%m-%d')
+    tt_func(pitflow2, betties, da_yr, strt, cutoff)
+  }) # output from tt_func
+  
+  # Display a plot for run-at-large counts (lmn to lgs) ----
+  output$lmn_lgs_counts <- renderPlot({
     da_yr<- ct_mdl()$da_yr
     n_sim<- ct_mdl()$n_sim
 
@@ -205,9 +205,8 @@ server <- function(input, output) {
         col=c('blue','red','grey50'), bty='n'))
   })
   
-  # Display a plot for PIT-tag conversion -----  
-  
-  output$pittag_counts <- renderPlot({
+  # Display a plot for PIT-tag conversion (ihr to lgr) -----  
+  output$ihr_lgr_pittag <- renderPlot({
     da_yr<- pi_out()$da_yr
     n_sim<- pi_out()$nsim
     betties<- tt_betties()
@@ -221,7 +220,8 @@ server <- function(input, output) {
     plot_conv(a, b, da_yr, prep_out$conv_obs, prep_out$conv_pre)
   })
   
-  output$histhist <- renderPlot({
+  # Compare observed and historical distributions PIT-tag fish (lmn to lgs) -----  
+  output$lmn_lgs_dist <- renderPlot({
     da_yr<- pi_out()$da_yr
     if(da_yr>2013) {
       strt<- format(input$strt, format='%m-%d')
@@ -253,7 +253,8 @@ server <- function(input, output) {
     }
   })
   
-  output$ftt_hist <- renderPlot({
+  # Compare observed and historical distributions PIT-tag fish (ihr to lgr) -----  
+  output$ihr_lgr_dist <- renderPlot({
     da_yr<- pi_out()$da_yr
     if(da_yr>2004) {
       ftt<- outtie()$ftt # define travel time (obs)
@@ -288,6 +289,7 @@ server <- function(input, output) {
         pch=c(1,0,15), col=c('white',1,1), bty='n')
     }
   })
+  
 }
 # Run the application ----
 shinyApp(ui = ui, server = server)
